@@ -1,0 +1,47 @@
+name: Compilar APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Compilar
+        run: gradle assembleRelease --no-daemon --stacktrace
+
+      - name: Preparar APK
+        run: cp app/build/outputs/apk/release/app-release.apk EscuchaMotor.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EscuchaMotor-apk
+          path: EscuchaMotor.apk
+
+      - name: Publicar en Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v1.0.${{ github.run_number }}"
+          gh release create "$TAG" EscuchaMotor.apk \
+            --title "Escucha Motor $TAG" \
+            --notes "Descarga EscuchaMotor.apk en el móvil e instálala. Se instala encima de versiones anteriores sin perder las fichas." \
+            --latest

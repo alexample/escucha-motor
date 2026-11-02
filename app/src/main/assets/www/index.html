@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Escucha Motor</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo">◉</span> Escucha Motor</div>
+  <select id="vehicleSel" aria-label="Vehículo"></select>
+  <button class="icon" id="btnSettings" aria-label="Ajustes">⚙</button>
+</header>
+
+<main>
+  <!-- GRABAR -->
+  <section id="v-grabar" class="view">
+    <div id="noVehicle" class="card hidden">
+      <h2>Primero, tu vehículo</h2>
+      <p class="muted">El número de cilindros permite calcular las revoluciones y detectar si algún cilindro trabaja peor.</p>
+      <button class="btn primary" data-act="newVehicle">Añadir vehículo</button>
+    </div>
+
+    <div id="recSetup">
+      <div class="card">
+        <h2>Tipo de prueba</h2>
+        <select id="testType">
+          <option>Ralentí en caliente</option>
+          <option>Arranque en frío</option>
+          <option>Régimen sostenido 2.500 rpm</option>
+        </select>
+        <p class="muted small" id="testHint"></p>
+        <label class="row">Duración
+          <select id="duration"><option value="15">15 s</option><option value="20" selected>20 s</option><option value="30">30 s</option></select>
+        </label>
+      </div>
+
+      <div class="card">
+        <h2>Antes de grabar</h2>
+        <ul class="checklist" id="checklist"></ul>
+        <button class="link small" data-go="guia">Ver el protocolo completo</button>
+      </div>
+
+      <button class="btn rec" id="btnRec"><span class="dot"></span> Grabar</button>
+      <button class="btn ghost" id="btnImport">Importar un audio ya grabado</button>
+      <input type="file" id="fileAudio" accept="audio/*" class="hidden">
+    </div>
+
+    <div id="recLive" class="card center hidden">
+      <div class="count" id="recCount">3</div>
+      <div class="muted" id="recMsg">Prepárate…</div>
+      <canvas id="meter" width="600" height="120"></canvas>
+      <div class="levelrow"><span id="lvlTxt">— dB</span><span id="clipTxt" class="warn hidden">¡Satura!</span></div>
+      <button class="btn ghost" id="btnStop">Cancelar</button>
+    </div>
+
+    <div id="recSave" class="hidden">
+      <div class="card">
+        <h2>Resultado de la grabación</h2>
+        <div id="saveQuality"></div>
+        <div class="kpis" id="saveKpis"></div>
+        <audio id="savePlayer" controls></audio>
+      </div>
+      <form class="card" id="saveForm">
+        <h2>Datos de la ficha</h2>
+        <label>Kilometraje
+          <input type="number" inputmode="numeric" id="fKm" required min="0" placeholder="Ej. 85400">
+        </label>
+        <label>Motivo de la grabación
+          <select id="fReason" required>
+            <option value="">Elige un motivo…</option>
+            <option>Grabación de referencia (motor sano)</option>
+            <option>Control periódico</option>
+            <option>Tras cambio de aceite / mantenimiento</option>
+            <option>Tras una reparación</option>
+            <option>He notado un ruido nuevo</option>
+            <option>Antes de la ITV</option>
+            <option>Antes de un viaje largo</option>
+            <option>Compra / venta del vehículo</option>
+            <option>Otro</option>
+          </select>
+        </label>
+        <label>Explica el motivo
+          <textarea id="fReasonText" rows="3" placeholder="Ej. Cambiadas bujías y bobina del cilindro 2 en el taller X"></textarea>
+        </label>
+        <div class="grid2">
+          <label>Temperatura ambiente (°C)
+            <input type="number" inputmode="decimal" id="fAmbient" placeholder="Opcional">
+          </label>
+          <label>Minutos de motor en marcha
+            <input type="number" inputmode="numeric" id="fWarm" placeholder="Opcional">
+          </label>
+        </div>
+        <label>Observaciones
+          <textarea id="fNotes" rows="2" placeholder="Opcional"></textarea>
+        </label>
+        <div class="actions">
+          <button type="button" class="btn ghost" id="btnDiscard">Descartar</button>
+          <button type="submit" class="btn primary">Guardar ficha</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <!-- FICHAS -->
+  <section id="v-fichas" class="view hidden">
+    <div class="bar">
+      <span class="muted" id="fichasCount"></span>
+      <button class="btn primary small" id="btnCompareSel" disabled>Comparar (0)</button>
+    </div>
+    <p class="muted small">Marca dos o más fichas para compararlas.</p>
+    <div id="fichasList"></div>
+  </section>
+
+  <!-- DETALLE -->
+  <section id="v-detalle" class="view hidden"></section>
+
+  <!-- INFORME -->
+  <section id="v-informe" class="view hidden">
+    <div id="reportBody"></div>
+  </section>
+
+  <!-- GUÍA -->
+  <section id="v-guia" class="view hidden">
+    <div class="card prose">
+      <h2>Protocolo de grabación</h2>
+      <p>Para que dos grabaciones se puedan comparar, lo único que debe cambiar entre ellas es el estado del motor. Todo lo demás tiene que repetirse igual.</p>
+      <h3>1. Siempre el mismo sitio</h3>
+      <ul>
+        <li>Mismo lugar (mejor siempre el mismo garaje o siempre al aire libre: un garaje cerrado hace eco y cambia el sonido).</li>
+        <li>Coche en llano, freno de mano puesto, en punto muerto (o P en automático).</li>
+        <li>Sin viento ni lluvia; sin otros motores cerca.</li>
+      </ul>
+      <h3>2. Siempre la misma posición del móvil</h3>
+      <ul>
+        <li>Capó abierto. Elige un punto fijo y fácil de repetir: por ejemplo, apoyado sobre el travesaño delantero, centrado sobre el motor, a unos 30–40 cm de la tapa de balancines.</li>
+        <li>Marca ese punto (una pegatina o una foto de referencia) y coloca el móvil siempre igual: misma orientación, micrófono inferior apuntando al motor.</li>
+        <li>Nunca sobre piezas calientes, el ventilador o correas. Sin tocarlo durante la grabación.</li>
+        <li>Quita la funda si tapa el micrófono. Usa siempre el mismo móvil.</li>
+      </ul>
+      <h3>3. Siempre el mismo estado del motor</h3>
+      <ul>
+        <li><b>Ralentí en caliente</b> (la prueba principal): motor a temperatura de servicio (aguja centrada o tras 10–15 min de conducción), y espera 1 minuto al ralentí antes de grabar para que se estabilice.</li>
+        <li><b>Arranque en frío</b>: motor que lleva al menos 6 horas parado. Pulsa grabar y arranca durante la cuenta atrás. Es útil para detectar taqués y cadena de distribución.</li>
+        <li><b>Régimen sostenido</b>: alguien mantiene el pedal fijo a unas 2.500 rpm mirando el cuentarrevoluciones.</li>
+        <li>Solo se comparan fichas del mismo tipo de prueba.</li>
+      </ul>
+      <h3>4. Sin ruidos ajenos</h3>
+      <ul>
+        <li>Aire acondicionado, ventilador del habitáculo, radio, luces y luneta térmica apagados.</li>
+        <li>Puertas cerradas. Nadie hablando cerca durante la grabación.</li>
+        <li>Si salta el electroventilador del radiador, espera a que pare y repite.</li>
+      </ul>
+      <h3>5. Cuándo grabar</h3>
+      <ul>
+        <li>Una grabación de referencia cuando el motor esté bien (o recién revisado).</li>
+        <li>Cada 5.000–10.000 km o en cada mantenimiento.</li>
+        <li>Siempre que notes un ruido nuevo, y antes y después de cualquier reparación.</li>
+      </ul>
+      <h3>Qué analiza la app</h3>
+      <ul>
+        <li><b>Revoluciones</b>: a partir del ritmo de las explosiones.</li>
+        <li><b>Regularidad y equilibrio entre cilindros</b>: si un cilindro quema menos, aparece un patrón que se repite cada ciclo.</li>
+        <li><b>Explosiones débiles</b>: posibles fallos de encendido o inyección.</li>
+        <li><b>Impulsividad en agudos</b>: golpes metálicos (taqués, distribución, picado).</li>
+        <li><b>Tonos</b>: silbidos nuevos de correas, rodamientos o turbo.</li>
+        <li><b>Timbre por bandas</b>: cómo se reparte la energía entre graves y agudos.</li>
+      </ul>
+      <p class="muted small">El informe es orientativo y se basa solo en el sonido. No sustituye el diagnóstico de un mecánico.</p>
+    </div>
+  </section>
+
+  <!-- AJUSTES -->
+  <section id="v-ajustes" class="view hidden">
+    <div class="card">
+      <h2>Vehículos</h2>
+      <div id="vehList"></div>
+      <button class="btn ghost" data-act="newVehicle">Añadir vehículo</button>
+    </div>
+    <div class="card">
+      <h2>Informe ampliado con Claude (opcional)</h2>
+      <p class="muted small">Si tienes una clave de la API de Anthropic, el informe puede incluir una interpretación redactada por Claude. Solo se envían los datos numéricos del análisis, nunca el audio. La clave se guarda solo en este teléfono.</p>
+      <label>Clave API
+        <input type="password" id="apiKey" placeholder="sk-ant-…" autocomplete="off">
+      </label>
+      <button class="btn ghost small" id="btnSaveKey">Guardar clave</button>
+    </div>
+    <div class="card">
+      <h2>Copia de seguridad</h2>
+      <p class="muted small">Las fichas se guardan dentro de la app. Si la desinstalas se pierden: exporta una copia de vez en cuando.</p>
+      <div class="actions">
+        <button class="btn ghost" id="btnExport">Exportar copia</button>
+        <button class="btn ghost" id="btnImportBk">Importar copia</button>
+      </div>
+      <input type="file" id="fileBackup" accept=".json,application/json" class="hidden">
+    </div>
+  </section>
+</main>
+
+<nav class="tabs">
+  <button data-go="grabar" class="on"><span>●</span>Grabar</button>
+  <button data-go="fichas"><span>▤</span>Fichas</button>
+  <button data-go="guia"><span>?</span>Guía</button>
+</nav>
+
+<div id="modal" class="modal hidden"><div class="sheet" id="modalBody"></div></div>
+<div id="toast" class="toast hidden"></div>
+
+<script src="analysis.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
