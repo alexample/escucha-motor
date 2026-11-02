@@ -458,6 +458,53 @@
     g.fillStyle = '#9aa1ab'; g.textAlign = 'left'; g.fillText('dB', 2, padT + 8);
   }
 
+  // ---------- diferencias de frecuencia ----------
+  const sgn = v => (v > 0 ? '+' : '') + String(v).replace('.', ',');
+  function freqHtml(p, pi) {
+    const fd = p.freq; if (!fd) return '';
+    const cls = d => Math.abs(d) >= 7 ? 'alerta' : Math.abs(d) >= 4 ? 'aviso' : 'ok';
+    return `<h3>Diferencias de frecuencia</h3>
+      <canvas class="chart" id="fd${pi}" style="height:170px"></canvas>
+      <p class="muted small">Diferencia del espectro (${fmtKm(p.b.km)} menos ${fmtKm(p.a.km)}). Por encima de 0: esa frecuencia suena más fuerte ahora.</p>
+      <div class="tblwrap"><table class="tbl">
+        <tr><th>Frecuencia</th><th>${(p.a.km / 1000).toLocaleString('es-ES', { maximumFractionDigits: 1 })}k</th><th>${(p.b.km / 1000).toLocaleString('es-ES', { maximumFractionDigits: 1 })}k</th><th>Cambio</th></tr>
+        ${fd.firing ? `<tr><td>Encendido</td><td>${String(fd.firing.a).replace('.', ',')} Hz<br><span class="muted">${fd.firing.rpmA} rpm</span></td><td>${String(fd.firing.b).replace('.', ',')} Hz<br><span class="muted">${fd.firing.rpmB} rpm</span></td><td>${sgn(fd.firing.pct)}%</td></tr>` : ''}
+        <tr><td>Centro tonal</td><td>${fd.centroid.a} Hz</td><td>${fd.centroid.b} Hz</td><td>${sgn(fd.centroid.pct)}%</td></tr>
+        ${fd.bands.map(b => `<tr><td>${b.lo >= 1000 ? b.lo / 1000 + 'k' : b.lo}–${b.hi >= 1000 ? b.hi / 1000 + 'k' : b.hi} Hz</td><td>${String(b.a).replace('.', ',')}</td><td>${String(b.b).replace('.', ',')}</td><td><span class="pill ${cls(b.d)}">${sgn(b.d)} dB</span></td></tr>`).join('')}
+      </table></div>
+      ${fd.zones.length ? `<p class="small" style="margin:10px 0 4px"><b>Zonas que más cambian</b></p>${fd.zones.map(z => `<div class="finding"><span class="pill ${z.max > 0 ? (Math.abs(z.max) >= 7 ? 'alerta' : 'aviso') : 'info'}">${z.max > 0 ? 'Sube' : 'Baja'}</span><span>${esc(z.text)}</span></div>`).join('')}` : '<p class="muted small">Ninguna zona del espectro cambia 3 dB o más.</p>'}
+      ${fd.tones.length ? `<p class="small" style="margin:10px 0 4px"><b>Tonos</b></p>${fd.tones.map(t => `<div class="finding"><span class="pill ${t.kind === 'nuevo' ? 'alerta' : t.kind === 'desplazado' ? 'aviso' : 'info'}">${t.kind === 'igual' ? 'Igual' : t.kind[0].toUpperCase() + t.kind.slice(1)}</span><span>${esc(t.text)}</span></div>`).join('')}` : ''}`;
+  }
+  function drawDiff(canvas, diff) {
+    const dpr = window.devicePixelRatio || 1;
+    const W = canvas.clientWidth, H = canvas.clientHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    const g = canvas.getContext('2d'); g.scale(dpr, dpr);
+    const padL = 34, padB = 22, padT = 8, padR = 8, fmin = 30, fmax = 16000;
+    let m = 6; diff.forEach(p => { m = Math.max(m, Math.abs(p[1])); }); m = Math.ceil(m / 3) * 3;
+    const X = f => padL + (Math.log(f / fmin) / Math.log(fmax / fmin)) * (W - padL - padR);
+    const Y = v => padT + (m - v) / (2 * m) * (H - padT - padB);
+    g.font = '11px system-ui'; g.fillStyle = '#9aa1ab'; g.strokeStyle = '#2c3038'; g.lineWidth = 1;
+    [50, 100, 200, 500, 1000, 2000, 5000, 10000].forEach(f => {
+      g.beginPath(); g.moveTo(X(f), padT); g.lineTo(X(f), H - padB); g.stroke();
+      g.textAlign = 'center'; g.fillText(f >= 1000 ? f / 1000 + 'k' : f, X(f), H - 6);
+    });
+    const step = m <= 9 ? 3 : 6;
+    for (let v = -m; v <= m; v += step) { g.textAlign = 'right'; g.fillText((v > 0 ? '+' : '') + v, padL - 4, Y(v) + 4); }
+    // banda de ±3 dB (cambio no significativo)
+    g.fillStyle = 'rgba(255,255,255,0.05)'; g.fillRect(padL, Y(3), W - padL - padR, Y(-3) - Y(3));
+    g.strokeStyle = '#555c66'; g.beginPath(); g.moveTo(padL, Y(0)); g.lineTo(W - padR, Y(0)); g.stroke();
+    // barras por punto
+    for (let i = 0; i < diff.length; i++) {
+      const [f, d] = diff[i];
+      const fNext = i + 1 < diff.length ? diff[i + 1][0] : f * 1.07;
+      const x0 = X(f), x1 = X(fNext);
+      g.fillStyle = Math.abs(d) < 3 ? '#555c66' : d > 0 ? (d >= 7 ? '#e5484d' : '#f5a524') : '#5b9bd5';
+      g.fillRect(x0, Math.min(Y(0), Y(d)), Math.max(1, x1 - x0 - 0.5), Math.abs(Y(d) - Y(0)));
+    }
+    g.fillStyle = '#9aa1ab'; g.textAlign = 'left'; g.fillText('dB', 2, padT + 8);
+  }
+
   // ---------- informe ----------
   async function showReport(ids) {
     const recs = [];
@@ -488,8 +535,8 @@
         ${row('Centro tonal', f => f.centroidHz + ' Hz')}
         ${row('Nivel', f => f.levelDb + ' dB')}
       </table></div></div>
-      ${rep.pairs.map(p => `<div class="card"><h2>${p.global ? 'Evolución total' : 'Cambios'} ${fmtKm(p.a.km)} → ${fmtKm(p.b.km)}</h2>
-        <p class="muted small">${esc(p.b.reason)}</p>${fl(p.findings)}</div>`).join('')}
+      ${rep.pairs.map((p, pi) => `<div class="card"><h2>${p.global ? 'Evolución total' : 'Cambios'} ${fmtKm(p.a.km)} → ${fmtKm(p.b.km)}</h2>
+        <p class="muted small">${esc(p.b.reason)}</p>${fl(p.findings)}${freqHtml(p, pi)}</div>`).join('')}
       ${rep.trends.length ? `<div class="card"><h2>Tendencias</h2>${rep.trends.map(t => `<div class="finding"><span class="pill ${t.worse ? 'aviso' : 'info'}">${t.worse ? 'Empeora' : 'Cambio'}</span><span>${esc(t.text)}</span></div>`).join('')}</div>` : ''}
       <div class="card"><h2>Rasgos anómalos por grabación</h2>${rep.absolute.length ? rep.absolute.map(f => `<div class="finding"><span class="pill ${f.level}">${fmtKm(f.rec.km)}</span><span><b>${esc(f.area)}.</b> ${esc(f.text)}</span></div>`).join('') : '<p class="muted">Ninguno.</p>'}
       ${rep.quality.length ? '<h3>Calidad de grabación</h3>' + rep.quality.map(q => `<div class="finding"><span class="pill ${q.level}">${fmtKm(q.rec.km)}</span><span>${esc(q.text)}</span></div>`).join('') : ''}</div>
@@ -499,6 +546,7 @@
       <div class="actions"><button class="btn ghost" id="btnCopy">Copiar</button><button class="btn primary" id="btnShare">Compartir informe</button></div>`;
     go('informe');
     drawSpectra($('#repChart'), sorted.map(r => ({ label: fmtKm(r.km), spec: r.features.spectrum })));
+    rep.pairs.forEach((p, pi) => { const c = document.getElementById('fd' + pi); if (c && p.freq) drawDiff(c, p.freq.diff); });
     const text = () => EM.reportToText(rep, fmtDate) + (S.aiText ? '\n\nINTERPRETACIÓN (Claude)\n' + S.aiText : '');
     S.aiText = '';
     $('#btnShare').onclick = () => shareText('Informe motor ' + (S.vehicle ? S.vehicle.name : ''), text());

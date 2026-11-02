@@ -324,15 +324,88 @@
     const cc = (fb.centroidHz - fa.centroidHz) / fa.centroidHz;
     if (Math.abs(cc) >= LIM.centroidChange) out.push({ level: 'info', area: 'Timbre', text: `El sonido es más ${cc > 0 ? 'agudo/metálico' : 'grave/apagado'} (centro tonal ${fa.centroidHz} → ${fb.centroidHz} Hz).` });
 
+    const within = (list, hz, tol) => (list || []).find(u => Math.abs(u.hz - hz) / hz <= tol);
     (fb.tones || []).forEach(t => {
-      if (t.prom >= LIM.newTone && !nearTone(fa.tones, t.hz))
-        out.push({ level: t.hz > 1500 ? 'alerta' : 'aviso', area: 'Tono nuevo', text: `Aparece un tono de ${t.hz} Hz (${t.prom} dB sobre el fondo) que no estaba antes: típico de silbido de correa, rodamiento (alternador, tensor, bomba de agua) o turbo.` });
+      if (nearTone(fa.tones, t.hz)) return;
+      const moved = within(fa.tones, t.hz, 0.1);
+      if (moved) out.push({ level: 'aviso', area: 'Tono desplazado', text: `El tono de ${moved.hz} Hz pasa a ${t.hz} Hz (${t.hz > moved.hz ? '+' : ''}${Math.round(1000 * (t.hz - moved.hz) / moved.hz) / 10}%). Si no se explica por un cambio de rpm, puede ser una correa o un rodamiento que cambia.` });
+      else if (t.prom >= LIM.newTone) out.push({ level: t.hz > 1500 ? 'alerta' : 'aviso', area: 'Tono nuevo', text: `Aparece un tono de ${t.hz} Hz (${t.prom} dB sobre el fondo) que no estaba antes: típico de silbido de correa, rodamiento (alternador, tensor, bomba de agua) o turbo.` });
     });
     (fa.tones || []).forEach(t => {
-      if (t.prom >= LIM.newTone && !nearTone(fb.tones, t.hz))
+      if (t.prom >= LIM.newTone && !nearTone(fb.tones, t.hz) && !within(fb.tones, t.hz, 0.1))
         out.push({ level: 'info', area: 'Tono', text: `Desaparece el tono de ${t.hz} Hz que había en la ficha anterior.` });
     });
     return out;
+  }
+
+  // ---------- diferencias de frecuencia entre dos fichas ----------
+  function interpSpec(spec, f) {
+    if (f <= spec[0][0]) return spec[0][1];
+    for (let i = 1; i < spec.length; i++) {
+      if (spec[i][0] >= f) {
+        const a = spec[i - 1], b = spec[i];
+        const t = Math.log(f / a[0]) / Math.log(b[0] / a[0]);
+        return a[1] + t * (b[1] - a[1]);
+      }
+    }
+    return null; // fuera de rango
+  }
+  const fmtHz = f => f >= 10000 ? String(r1(f / 1000)).replace('.', ',') + ' kHz' : Math.round(f).toLocaleString('es-ES') + ' Hz';
+  const cm = v => String(v).replace('.', ',');
+
+  function freqDiff(fa, fb) {
+    const out = { bands: [], diff: [], zones: [], tones: [] };
+    // ritmo de combustión (frecuencia fundamental del motor)
+    if (fa.firingHz && fb.firingHz) {
+      out.firing = { a: fa.firingHz, b: fb.firingHz, rpmA: fa.rpm, rpmB: fb.rpm, d: r1(fb.firingHz - fa.firingHz), pct: r1(100 * (fb.firingHz - fa.firingHz) / fa.firingHz) };
+    }
+    out.centroid = { a: fa.centroidHz, b: fb.centroidHz, d: fb.centroidHz - fa.centroidHz, pct: r1(100 * (fb.centroidHz - fa.centroidHz) / fa.centroidHz) };
+    BANDS.forEach(b => out.bands.push({ name: b.name, lo: b.lo, hi: b.hi, a: fa.bands[b.id], b: fb.bands[b.id], d: r1(fb.bands[b.id] - fa.bands[b.id]) }));
+    // curva de diferencia (B − A) sobre la rejilla de A
+    fa.spectrum.forEach(p => {
+      const vb = interpSpec(fb.spectrum, p[0]);
+      if (vb != null) out.diff.push([p[0], r1(vb - p[1])]);
+    });
+    // zonas con cambios >= 3 dB
+    let cur = null;
+    const close = () => { if (cur && cur.n >= 2) out.zones.push(cur); cur = null; };
+    out.diff.forEach(([f, d]) => {
+      const sign = d >= 3 ? 1 : d <= -3 ? -1 : 0;
+      if (!sign) { close(); return; }
+      if (cur && cur.sign === sign) { cur.hi = f; cur.sum += d; cur.n++; if (Math.abs(d) > Math.abs(cur.max)) { cur.max = d; cur.at = f; } }
+      else { close(); cur = { sign, lo: f, hi: f, sum: d, n: 1, max: d, at: f }; }
+    });
+    close();
+    out.zones = out.zones.map(z => ({ lo: z.lo, hi: z.hi, avg: r1(z.sum / z.n), max: r1(z.max), at: z.at, text: `${fmtHz(z.lo)} – ${fmtHz(z.hi)}: ${z.sign > 0 ? 'sube' : 'baja'} de media ${cm(r1(Math.abs(z.sum / z.n)))} dB (máx. ${cm(r1(Math.abs(z.max)))} dB en ${fmtHz(z.at)})` }))
+      .sort((x, y) => Math.abs(y.max) - Math.abs(x.max)).slice(0, 6);
+    // tonos: se mantienen, se desplazan, aparecen o desaparecen
+    const ta = fa.tones || [], tb = fb.tones || [];
+    const used = new Set();
+    tb.forEach(t => {
+      let best = null, bd = Infinity;
+      ta.forEach((u, i) => { const d = Math.abs(u.hz - t.hz) / t.hz; if (d < bd && !used.has(i)) { bd = d; best = i; } });
+      if (best != null && bd <= 0.1) {
+        used.add(best);
+        const u = ta[best];
+        const dHz = t.hz - u.hz, dp = r1(t.prom - u.prom);
+        if (bd >= 0.015) out.tones.push({ kind: 'desplazado', a: u.hz, b: t.hz, text: `Tono desplazado: ${fmtHz(u.hz)} → ${fmtHz(t.hz)} (${dHz > 0 ? '+' : ''}${dHz} Hz, ${dHz > 0 ? '+' : ''}${cm(r1(100 * dHz / u.hz))}%). Si gira con el motor, sigue a las rpm; si no, puede ser un rodamiento o una correa que cambia de tensión.` });
+        else out.tones.push({ kind: 'igual', a: u.hz, b: t.hz, text: `Tono de ${fmtHz(t.hz)} se mantiene (${dp >= 0 ? '+' : ''}${cm(dp)} dB de intensidad).` });
+      } else out.tones.push({ kind: 'nuevo', b: t.hz, text: `Tono nuevo de ${fmtHz(t.hz)} (${cm(t.prom)} dB sobre el fondo).` });
+    });
+    ta.forEach((u, i) => { if (!used.has(i)) out.tones.push({ kind: 'desaparece', a: u.hz, text: `Desaparece el tono de ${fmtHz(u.hz)}.` }); });
+    return out;
+  }
+
+  function freqDiffText(fd) {
+    const L = [];
+    if (fd.firing) L.push(`• Frecuencia de encendido: ${cm(fd.firing.a)} → ${cm(fd.firing.b)} Hz (${fd.firing.d >= 0 ? '+' : ''}${cm(fd.firing.d)} Hz, ${fd.firing.pct >= 0 ? '+' : ''}${cm(fd.firing.pct)}%; ≈${fd.firing.rpmA} → ${fd.firing.rpmB} rpm).`);
+    L.push(`• Centro tonal: ${fd.centroid.a} → ${fd.centroid.b} Hz (${fd.centroid.d >= 0 ? '+' : ''}${fd.centroid.d} Hz).`);
+    L.push('• Bandas (dB relativos, antes → después = cambio):');
+    fd.bands.forEach(b => L.push(`   ${b.name} ${b.lo}–${b.hi} Hz: ${cm(b.a)} → ${cm(b.b)} = ${b.d >= 0 ? '+' : ''}${cm(b.d)} dB`));
+    if (fd.zones.length) { L.push('• Zonas del espectro que más cambian:'); fd.zones.forEach(z => L.push('   ' + z.text)); }
+    else L.push('• Ninguna zona del espectro cambia 3 dB o más.');
+    if (fd.tones.length) { L.push('• Tonos:'); fd.tones.forEach(t => L.push('   ' + t.text)); }
+    return L;
   }
 
   function trend(records, key) {
@@ -357,10 +430,10 @@
     });
     for (let i = 1; i < recs.length; i++) {
       const prev = recs[i - 1];
-      rep.pairs.push({ a: prev, b: recs[i], findings: compareTwo(prev, recs[i]).sort((x, y) => LEVEL_ORDER[x.level] - LEVEL_ORDER[y.level]) });
+      rep.pairs.push({ a: prev, b: recs[i], freq: freqDiff(prev.features, recs[i].features), findings: compareTwo(prev, recs[i]).sort((x, y) => LEVEL_ORDER[x.level] - LEVEL_ORDER[y.level]) });
     }
     if (recs.length > 2) {
-      rep.pairs.push({ a: ref, b: recs[recs.length - 1], global: true, findings: compareTwo(ref, recs[recs.length - 1]).sort((x, y) => LEVEL_ORDER[x.level] - LEVEL_ORDER[y.level]) });
+      rep.pairs.push({ a: ref, b: recs[recs.length - 1], global: true, freq: freqDiff(ref.features, recs[recs.length - 1].features), findings: compareTwo(ref, recs[recs.length - 1]).sort((x, y) => LEVEL_ORDER[x.level] - LEVEL_ORDER[y.level]) });
       const T = [
         ['imbalance', 'Desequilibrio de cilindros', 0.1, v => r2(v)],
         ['cycleCv', 'Irregularidad entre explosiones', 0.05, v => Math.round(v * 100) + ' pts %'],
@@ -410,6 +483,7 @@
       L.push(p.global ? `EVOLUCIÓN TOTAL ${p.a.km.toLocaleString('es-ES')} km → ${p.b.km.toLocaleString('es-ES')} km` : `DIFERENCIAS ${p.a.km.toLocaleString('es-ES')} km → ${p.b.km.toLocaleString('es-ES')} km`);
       if (!p.findings.length) L.push('• Sin diferencias relevantes.');
       p.findings.forEach(f => L.push(`• ${tag(f.level)} ${f.area}: ${f.text}`));
+      if (p.freq) { L.push('  Diferencias de frecuencia:'); freqDiffText(p.freq).forEach(x => L.push('  ' + x)); }
       L.push('');
     });
     if (rep.trends.length) { L.push('TENDENCIAS'); rep.trends.forEach(t => L.push('• ' + t.text)); L.push(''); }
@@ -422,7 +496,7 @@
     return L.join('\n');
   }
 
-  const EM = { analyze, absoluteFindings, compareTwo, buildReport, reportToText, BANDS, LIM };
+  const EM = { analyze, absoluteFindings, compareTwo, freqDiff, buildReport, reportToText, BANDS, LIM };
   if (typeof module !== 'undefined' && module.exports) module.exports = EM;
   else root.EM = EM;
 })(typeof window !== 'undefined' ? window : globalThis);
