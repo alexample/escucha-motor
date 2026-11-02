@@ -20,111 +20,122 @@
   }
   const defs = `<defs><marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="${C.accent}"/></marker></defs>`;
 
+  const board = (x, y, w, h) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="3" fill="#7a5a3a" opacity=".55" stroke="#a07850"/>`;
+  // móvil visto desde arriba bajo el motor (trazo discontinuo = está debajo)
+  const phoneUnder = (x, y, w, h) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="3" fill="${C.accent}" fill-opacity=".85" stroke="#fff" stroke-width="1.2" stroke-dasharray="3 2"/>`;
+
   function carTop() {
-    return `<svg viewBox="0 0 340 290" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Coche visto desde arriba con el móvil junto a la rueda delantera izquierda">${defs}
+    return `<svg viewBox="0 0 340 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Coche visto desde arriba con el móvil debajo del motor sobre una tabla">${defs}
       ${T(170, 16, 'VISTA DESDE ARRIBA', { fill: C.muted, size: 11, weight: 700 })}
-      ${T(300, 46, '▲ delante', { fill: C.muted, size: 11 })}
-      <rect x="125" y="34" width="120" height="236" rx="34" fill="${C.body}" stroke="${C.bodyLine}" stroke-width="1.5"/>
-      <rect x="137" y="112" width="96" height="34" rx="9" fill="${C.glass}"/>
-      <rect x="140" y="214" width="90" height="24" rx="8" fill="${C.glass}"/>
-      <rect x="148" y="46" width="74" height="50" rx="6" fill="${C.engine}" stroke="${C.accent}" stroke-dasharray="4 3"/>
-      ${T(185, 76, 'MOTOR', { fill: C.accent, size: 11, weight: 800 })}
-      <rect x="111" y="56" width="18" height="44" rx="5" fill="${C.wheel}" stroke="${C.rim}"/>
-      <rect x="241" y="56" width="18" height="44" rx="5" fill="${C.wheel}" stroke="${C.rim}"/>
-      <rect x="111" y="200" width="18" height="44" rx="5" fill="${C.wheel}" stroke="${C.rim}"/>
-      <rect x="241" y="200" width="18" height="44" rx="5" fill="${C.wheel}" stroke="${C.rim}"/>
-      <line x1="40" y1="78" x2="111" y2="78" stroke="${C.muted}" stroke-dasharray="3 3"/>
-      ${phoneTop(44, 68, 30, 20, 'right')}
-      ${dimH(77, 111, 110, '20 cm')}
-      <path d="M76,60 Q92,46 108,58" fill="none" stroke="${C.accent}" stroke-width="1.5" marker-end="url(#ar)"/>
-      ${T(60, 52, 'micrófono', { fill: C.accent, size: 11, weight: 700 })}
-      ${T(66, 140, 'centrado con', { fill: C.muted, size: 11 })}${T(66, 154, 'el eje de la rueda', { fill: C.muted, size: 11 })}
-      ${T(40, 196, 'lado', { fill: C.muted, size: 11, anchor: 'start' })}${T(40, 210, 'izquierdo', { fill: C.muted, size: 11, anchor: 'start' })}
+      ${T(334, 16, '▲ delante', { fill: C.muted, size: 11, anchor: 'end' })}
+      ${board(160, 24, 50, 62)}
+      <line x1="156" y1="44" x2="214" y2="44" stroke="#fff" stroke-width="2"/>
+      <rect x="125" y="44" width="120" height="236" rx="34" fill="${C.body}" stroke="${C.bodyLine}" stroke-width="1.5" fill-opacity=".92"/>
+      <rect x="137" y="122" width="96" height="34" rx="9" fill="${C.glass}"/>
+      <rect x="140" y="224" width="90" height="24" rx="8" fill="${C.glass}"/>
+      <rect x="111" y="66" width="18" height="44" rx="5" fill="${C.wheel}" stroke="${C.rim}"/>
+      <rect x="241" y="66" width="18" height="44" rx="5" fill="${C.wheel}" stroke="${C.rim}"/>
+      <rect x="111" y="210" width="18" height="44" rx="5" fill="${C.wheel}" stroke="${C.rim}"/>
+      <rect x="241" y="210" width="18" height="44" rx="5" fill="${C.wheel}" stroke="${C.rim}"/>
+      <rect x="146" y="54" width="78" height="56" rx="6" fill="${C.engine}" stroke="${C.accent}" stroke-dasharray="4 3"/>
+      ${board(160, 44, 50, 42)}
+      ${phoneUnder(172, 58, 26, 22)}
+      ${T(185, 104, 'MOTOR', { fill: C.accent, size: 11, weight: 800 })}
+      <line x1="214" y1="44" x2="262" y2="44" stroke="#fff" stroke-dasharray="2 2"/>
+      ${T(264, 45, 'marca de', { fill: C.text, size: 10, weight: 700, anchor: 'start' })}${T(264, 58, 'la tabla =', { fill: C.text, size: 10, weight: 700, anchor: 'start' })}${T(264, 71, 'borde del', { fill: C.muted, size: 10, anchor: 'start' })}${T(264, 84, 'paragolpes', { fill: C.muted, size: 10, anchor: 'start' })}
+      <path d="M146,22 L146,66" stroke="${C.accent}" stroke-width="2" marker-end="url(#ar)"/>
+      ${T(14, 36, 'empuja la tabla', { fill: C.accent, size: 11, weight: 700, anchor: 'start' })}${T(14, 50, 'desde delante', { fill: C.accent, size: 11, weight: 700, anchor: 'start' })}
+      ${T(60, 140, 'móvil en el suelo,', { fill: C.text, size: 11, weight: 700 })}${T(60, 154, 'centrado debajo', { fill: C.text, size: 11 })}${T(60, 168, 'del motor', { fill: C.text, size: 11 })}
+      <line x1="100" y1="146" x2="168" y2="76" stroke="${C.muted}" stroke-dasharray="2 3"/>
     </svg>`;
   }
 
   function carFront() {
-    return `<svg viewBox="0 0 340 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Coche visto de frente con el móvil en el suelo junto a la rueda">${defs}
+    return `<svg viewBox="0 0 340 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Coche visto de frente con el móvil en el suelo debajo del motor">${defs}
       ${T(170, 16, 'VISTA DE FRENTE', { fill: C.muted, size: 11, weight: 700 })}
       <path d="M62,168 L66,118 Q70,100 92,96 L118,62 Q124,54 136,54 L204,54 Q216,54 222,62 L248,96 Q270,100 274,118 L278,168 Z" fill="${C.body}" stroke="${C.bodyLine}" stroke-width="1.5"/>
       <path d="M126,66 L214,66 L238,96 L102,96 Z" fill="${C.glass}"/>
-      <rect x="128" y="124" width="84" height="22" rx="5" fill="${C.glass}"/>
       <rect x="76" y="108" width="34" height="12" rx="4" fill="#d9dde3" opacity=".75"/>
       <rect x="230" y="108" width="34" height="12" rx="4" fill="#d9dde3" opacity=".75"/>
+      <rect x="122" y="112" width="96" height="62" rx="6" fill="${C.engine}" stroke="${C.accent}" stroke-dasharray="4 3"/>
+      ${T(170, 140, 'MOTOR', { fill: C.accent, size: 11, weight: 800 })}
+      ${T(170, 154, '(cárter)', { fill: C.accent, size: 10 })}
       <rect x="66" y="150" width="30" height="50" rx="7" fill="${C.wheel}" stroke="${C.rim}"/>
       <rect x="244" y="150" width="30" height="50" rx="7" fill="${C.wheel}" stroke="${C.rim}"/>
       <line x1="10" y1="200" x2="330" y2="200" stroke="${C.ground}" stroke-width="3"/>
-      <rect x="292" y="194" width="34" height="5" rx="2" fill="${C.cloth}"/>
-      <rect x="295" y="190" width="28" height="4" rx="1.5" fill="${C.accent}"/>
-      ${dimH(274, 293, 178, '20 cm')}
-      ${T(336, 216, 'paño doblado', { fill: C.cloth, size: 10, weight: 700, anchor: 'end' })}
-      ${T(334, 64, 'pantalla', { fill: C.muted, size: 11, anchor: 'end' })}${T(334, 77, 'hacia arriba', { fill: C.muted, size: 11, anchor: 'end' })}<line x1="312" y1="84" x2="309" y2="184" stroke="${C.muted}" stroke-dasharray="2 3"/>
-      ${T(30, 216, 'rueda derecha', { fill: C.muted, size: 10, anchor: 'start' })}
+      ${board(132, 194, 76, 5)}
+      <rect x="155" y="189" width="30" height="5" rx="1.5" fill="${C.accent}"/>
+      <line x1="170" y1="176" x2="170" y2="187" stroke="${C.accent}" stroke-width="1.5" marker-end="url(#ar)"/>
+      ${T(170, 220, 'móvil sobre la tabla, pantalla arriba', { fill: C.text, size: 11, weight: 700 })}
+      ${T(304, 150, 'el motor', { fill: C.muted, size: 11 })}${T(304, 163, 'queda justo', { fill: C.muted, size: 11 })}${T(304, 176, 'encima', { fill: C.muted, size: 11 })}
     </svg>`;
   }
 
   function motoTop() {
-    return `<svg viewBox="0 0 340 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Moto vista desde arriba con el móvil delante de la rueda delantera">${defs}
+    return `<svg viewBox="0 0 340 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Moto vista desde arriba con el móvil debajo del motor sobre una tabla">${defs}
       ${T(170, 16, 'VISTA DESDE ARRIBA', { fill: C.muted, size: 11, weight: 700 })}
-      ${T(300, 46, '▲ delante', { fill: C.muted, size: 11 })}
-      <line x1="170" y1="30" x2="170" y2="290" stroke="${C.muted}" stroke-dasharray="3 3"/>
-      ${phoneTop(158, 34, 24, 38, 'down')}
-      ${dimV(200, 75, 108, '30 cm')}
-      <path d="M150,72 Q138,90 156,104" fill="none" stroke="${C.accent}" stroke-width="1.5" marker-end="url(#ar)"/>
-      ${T(112, 72, 'micrófono', { fill: C.accent, size: 11, weight: 700 })}
-      <rect x="160" y="108" width="20" height="62" rx="8" fill="${C.wheel}" stroke="${C.rim}"/>
-      <line x1="112" y1="158" x2="228" y2="158" stroke="${C.bodyLine}" stroke-width="5" stroke-linecap="round"/>
-      <rect x="148" y="166" width="44" height="86" rx="18" fill="${C.body}" stroke="${C.bodyLine}" stroke-width="1.5"/>
-      <rect x="146" y="196" width="48" height="34" rx="6" fill="${C.engine}" stroke="${C.accent}" stroke-dasharray="4 3"/>
-      ${T(240, 218, 'MOTOR', { fill: C.accent, size: 11, weight: 800, anchor: 'start' })}
-      <line x1="196" y1="213" x2="236" y2="213" stroke="${C.accent}" stroke-width="1" stroke-dasharray="2 2"/>
-      <rect x="160" y="246" width="20" height="50" rx="8" fill="${C.wheel}" stroke="${C.rim}"/>
-      ${T(66, 140, 'centrado con', { fill: C.muted, size: 11 })}${T(66, 154, 'la rueda', { fill: C.muted, size: 11 })}
+      ${T(326, 34, '▲ delante', { fill: C.muted, size: 11, anchor: 'end' })}
+      ${board(64, 184, 126, 40)}
+      <rect x="160" y="40" width="20" height="62" rx="8" fill="${C.wheel}" stroke="${C.rim}"/>
+      <line x1="112" y1="96" x2="228" y2="96" stroke="${C.bodyLine}" stroke-width="5" stroke-linecap="round"/>
+      <rect x="148" y="104" width="44" height="132" rx="18" fill="${C.body}" stroke="${C.bodyLine}" stroke-width="1.5" fill-opacity=".92"/>
+      <rect x="126" y="226" width="20" height="5" rx="2" fill="${C.bodyLine}"/><rect x="194" y="226" width="20" height="5" rx="2" fill="${C.bodyLine}"/>
+      <rect x="144" y="176" width="52" height="56" rx="6" fill="${C.engine}" stroke="${C.accent}" stroke-dasharray="4 3"/>
+      ${board(146, 184, 44, 40)}
+      ${phoneUnder(157, 192, 22, 26)}
+      ${T(200, 172, 'MOTOR', { fill: C.accent, size: 11, weight: 800, anchor: 'start' })}
+      <rect x="160" y="238" width="20" height="54" rx="8" fill="${C.wheel}" stroke="${C.rim}"/>
+      <line x1="64" y1="176" x2="64" y2="232" stroke="#fff" stroke-width="2"/>
+      <line x1="64" y1="231" x2="126" y2="231" stroke="#fff" stroke-dasharray="2 2"/>
+      ${T(14, 256, 'marca de la tabla =', { fill: C.text, size: 10, weight: 700, anchor: 'start' })}${T(14, 269, 'borde de la estribera', { fill: C.muted, size: 10, anchor: 'start' })}
+      <path d="M20,204 L60,204" stroke="${C.accent}" stroke-width="2" marker-end="url(#ar)"/>
+      ${T(14, 160, 'empuja la tabla', { fill: C.accent, size: 11, weight: 700, anchor: 'start' })}${T(14, 174, 'desde el lateral', { fill: C.accent, size: 11, weight: 700, anchor: 'start' })}
+      ${T(276, 214, 'móvil centrado', { fill: C.text, size: 11, weight: 700 })}${T(276, 228, 'debajo del motor', { fill: C.text, size: 11 })}
+      <line x1="232" y1="218" x2="182" y2="206" stroke="${C.muted}" stroke-dasharray="2 3"/>
     </svg>`;
   }
 
   function motoSide() {
-    return `<svg viewBox="0 0 340 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Moto vista de lado con el móvil en el suelo delante de la rueda delantera">${defs}
+    return `<svg viewBox="0 0 340 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Moto vista de lado con el móvil en el suelo debajo del motor">${defs}
       ${T(170, 16, 'VISTA DE LADO', { fill: C.muted, size: 11, weight: 700 })}
       ${T(326, 34, 'delante ▶', { fill: C.muted, size: 11, anchor: 'end' })}
       <line x1="10" y1="190" x2="330" y2="190" stroke="${C.ground}" stroke-width="3"/>
       <circle cx="74" cy="152" r="37" fill="${C.wheel}" stroke="${C.rim}" stroke-width="2"/><circle cx="74" cy="152" r="8" fill="${C.rim}"/>
-      <circle cx="232" cy="152" r="37" fill="${C.wheel}" stroke="${C.rim}" stroke-width="2"/><circle cx="232" cy="152" r="8" fill="${C.rim}"/>
-      <line x1="232" y1="152" x2="206" y2="66" stroke="${C.bodyLine}" stroke-width="6" stroke-linecap="round"/>
-      <line x1="200" y1="62" x2="186" y2="52" stroke="${C.bodyLine}" stroke-width="5" stroke-linecap="round"/>
-      <path d="M74,152 L118,104 L196,98" fill="none" stroke="${C.bodyLine}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-      <path d="M128,84 Q150,64 196,72 L200,92 L128,98 Z" fill="${C.body}" stroke="${C.bodyLine}"/>
-      <path d="M78,90 L130,84 L128,98 L84,100 Z" fill="${C.body}" stroke="${C.bodyLine}"/>
-      <rect x="128" y="104" width="52" height="46" rx="8" fill="${C.engine}" stroke="${C.accent}" stroke-dasharray="4 3"/>
-      ${T(154, 132, 'MOTOR', { fill: C.accent, size: 11, weight: 800 })}
-      <path d="M128,148 Q96,170 40,166" fill="none" stroke="${C.bodyLine}" stroke-width="4" stroke-linecap="round"/>
-      <rect x="290" y="184" width="34" height="5" rx="2" fill="${C.cloth}"/>
-      <rect x="293" y="180" width="28" height="4" rx="1.5" fill="${C.accent}"/>
-      ${dimH(269, 291, 166, '30 cm')}
-      ${T(336, 205, 'paño doblado', { fill: C.cloth, size: 10, weight: 700, anchor: 'end' })}
-      ${T(300, 128, 'micrófono', { fill: C.accent, size: 11, weight: 700 })}${T(300, 141, 'hacia la rueda', { fill: C.accent, size: 11, weight: 700 })}
+      <circle cx="252" cy="152" r="37" fill="${C.wheel}" stroke="${C.rim}" stroke-width="2"/><circle cx="252" cy="152" r="8" fill="${C.rim}"/>
+      <line x1="252" y1="152" x2="226" y2="66" stroke="${C.bodyLine}" stroke-width="6" stroke-linecap="round"/>
+      <line x1="220" y1="62" x2="206" y2="52" stroke="${C.bodyLine}" stroke-width="5" stroke-linecap="round"/>
+      <path d="M74,152 L118,104 L216,98" fill="none" stroke="${C.bodyLine}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M138,84 Q162,64 214,72 L218,92 L138,98 Z" fill="${C.body}" stroke="${C.bodyLine}"/>
+      <path d="M80,90 L140,84 L138,98 L86,100 Z" fill="${C.body}" stroke="${C.bodyLine}"/>
+      <rect x="132" y="104" width="64" height="54" rx="8" fill="${C.engine}" stroke="${C.accent}" stroke-dasharray="4 3"/>
+      ${T(164, 128, 'MOTOR', { fill: C.accent, size: 11, weight: 800 })}${T(164, 142, '(cárter)', { fill: C.accent, size: 10 })}
+      <path d="M196,150 Q150,176 40,166" fill="none" stroke="${C.bodyLine}" stroke-width="4" stroke-linecap="round"/>
+      ${board(124, 184, 80, 5)}
+      <rect x="149" y="179" width="30" height="5" rx="1.5" fill="${C.accent}"/>
+      <line x1="164" y1="159" x2="164" y2="176" stroke="${C.accent}" stroke-width="1.5" marker-end="url(#ar)"/>
+      ${T(170, 210, 'móvil sobre la tabla, justo debajo del motor', { fill: C.text, size: 11, weight: 700 })}
     </svg>`;
   }
 
   const STEPS = {
     coche: [
-      'Coche en llano, freno de mano y punto muerto (P en automático). Capó cerrado.',
-      'Móvil en el suelo, en el lado izquierdo, a 20 cm del neumático delantero y centrado con el eje de la rueda.',
-      'Pantalla hacia arriba y el borde del micrófono apuntando a la rueda.',
-      'Debajo, siempre el mismo paño doblado: aísla de las vibraciones del suelo.',
-      'Marca el sitio con cinta en el suelo y las ruedas rectas, para repetirlo igual cada vez.'
+      'Coche en llano, freno de mano y punto muerto (P en automático), ruedas rectas.',
+      'Pon el móvil sobre una tabla o cartón rígido (siempre la misma), en un sitio marcado, con la pantalla hacia arriba y el micrófono hacia delante. Sin funda.',
+      'Pulsa Grabar (cuenta atrás de 10 s) y empuja la tabla desde delante hasta que la marca coincida con el borde del paragolpes: el móvil queda centrado justo debajo del motor.',
+      'No metas el cuerpo debajo del coche. Si el tubo de escape o el catalizador pasan por debajo del motor, desplaza la marca para que el móvil no quede bajo ellos.',
+      'Cuando el móvil vibre dos veces, la grabación ha terminado: tira de la tabla para sacarlo.'
     ],
     moto: [
-      'Moto en llano, sobre el caballete central (o siempre el mismo), en punto muerto.',
-      'Móvil en el suelo, delante de la rueda delantera, a 30 cm del neumático y centrado con ella.',
-      'Pantalla hacia arriba y el borde del micrófono apuntando a la rueda.',
-      'Debajo, siempre el mismo paño doblado: aísla de las vibraciones del suelo.',
-      'Manillar recto. Marca el sitio con cinta en el suelo para repetirlo igual cada vez.'
+      'Moto en llano, siempre sobre el mismo caballete (el lateral si el central no deja hueco), en punto muerto.',
+      'Pon el móvil sobre una tabla o cartón rígido (siempre la misma), en un sitio marcado, con la pantalla hacia arriba y el micrófono hacia delante. Sin funda.',
+      'Pulsa Grabar (cuenta atrás de 10 s) y empuja la tabla desde el lateral hasta que la marca coincida con el borde de la estribera: el móvil queda centrado debajo del motor.',
+      'Que el móvil no quede debajo del colector ni del tubo de escape: se calientan mucho.',
+      'Cuando el móvil vibre dos veces, la grabación ha terminado: tira de la tabla para sacarlo.'
     ]
   };
   const CHECK = {
-    coche: 'Móvil en la marca: 20 cm de la rueda delantera izquierda, micro hacia la rueda',
-    moto: 'Móvil en la marca: 30 cm delante de la rueda delantera, micro hacia la rueda'
+    coche: 'Móvil en la tabla, debajo del motor (marca en el borde del paragolpes)',
+    moto: 'Móvil en la tabla, debajo del motor (marca en el borde de la estribera)'
   };
 
   function infographic(type) {

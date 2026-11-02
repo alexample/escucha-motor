@@ -181,6 +181,9 @@
   }
   $('#testType').value = LS.get('testType', 'Ralentí en caliente');
   $('#duration').value = String(LS.get('duration', 20));
+  $('#countdown').value = String(LS.get('countdown', 10));
+  $('#countdown').onchange = () => LS.set('countdown', +$('#countdown').value);
+  const buzz = p => { try { navigator.vibrate && navigator.vibrate(p); } catch (e) { } };
   $('#testType').onchange = () => { LS.set('testType', $('#testType').value); renderChecklist(); };
   $('#duration').onchange = () => LS.set('duration', +$('#duration').value);
   renderChecklist();
@@ -221,14 +224,14 @@
     };
     if (Bridge && Bridge.keepScreenOn) Bridge.keepScreenOn(true);
     $('#recSetup').classList.add('hidden'); $('#recLive').classList.remove('hidden');
-    let n = 3;
-    $('#recCount').textContent = n; $('#recMsg').textContent = $('#testType').value === 'Arranque en frío' ? 'Arranca el motor al llegar a 0' : 'No toques el móvil';
+    let n = +$('#countdown').value || 3;
+    $('#recCount').textContent = n; $('#recMsg').textContent = $('#testType').value === 'Arranque en frío' ? 'Coloca el móvil debajo del motor y arranca al llegar a 0' : 'Coloca el móvil debajo del motor';
     drawMeter();
     rec.timer = setInterval(() => {
       n--;
       if (n > 0) { $('#recCount').textContent = n; return; }
       clearInterval(rec.timer);
-      rec.recording = true; rec.clip = false; rec.t0 = performance.now();
+      rec.recording = true; rec.clip = false; rec.t0 = performance.now(); buzz(300);
       $('#recMsg').textContent = 'Grabando…';
       rec.timer = setInterval(() => {
         const left = Math.max(0, rec.dur - (performance.now() - rec.t0) / 1000);
@@ -264,6 +267,7 @@
     const r = rec; teardown(); rec = null;
     $('#recLive').classList.add('hidden');
     if (cancel || !r.chunks.length) { $('#recSetup').classList.remove('hidden'); return; }
+    buzz([250, 150, 250]);
     const total = r.chunks.reduce((a, c) => a + c.length, 0);
     const pcm = new Float32Array(total); let o = 0;
     r.chunks.forEach(c => { pcm.set(c, o); o += c.length; });
