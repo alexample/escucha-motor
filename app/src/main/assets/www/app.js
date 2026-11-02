@@ -80,6 +80,8 @@
     $$('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.go === view || (view === 'detalle' || view === 'informe') && b.dataset.go === 'fichas'));
     if (view === 'fichas') renderFichas();
     if (view === 'ajustes') renderAjustes();
+    if (view === 'guia') renderPlacement(S.vehicle && S.vehicle.type === 'moto' ? 'moto' : 'coche');
+    if (view === 'grabar') renderChecklist();
     window.scrollTo(0, 0);
     if (Bridge && Bridge.setCanGoBack) Bridge.setCanGoBack(view !== 'grabar');
   }
@@ -104,6 +106,7 @@
     sel.innerHTML = S.vehicles.map(v => `<option value="${v.id}">${esc(v.name)}</option>`).join('') + '<option value="__new">+ Nuevo vehículo…</option>';
     if (S.vehicle) sel.value = S.vehicle.id; else sel.value = '';
     sel.classList.toggle('hidden', !S.vehicles.length);
+    renderChecklist();
     $('#noVehicle').classList.toggle('hidden', !!S.vehicle);
     $('#recSetup').classList.toggle('hidden', !S.vehicle);
     await loadRecs();
@@ -120,21 +123,22 @@
 
   function vehicleForm(v) {
     const isNew = !v;
-    v = v || { id: uid(), name: '', cylinders: 4, fuel: 'Gasolina', created: Date.now() };
+    v = v || { id: uid(), name: '', type: 'coche', cylinders: 4, fuel: 'Gasolina', created: Date.now() };
     modal(`<h2>${isNew ? 'Nuevo vehículo' : 'Editar vehículo'}</h2>
       <form id="vf">
+        <label>Tipo<select id="vType"><option value="coche" ${v.type !== 'moto' ? 'selected' : ''}>Coche</option><option value="moto" ${v.type === 'moto' ? 'selected' : ''}>Moto</option></select></label>
         <label>Nombre o matrícula<input id="vName" required value="${esc(v.name)}" placeholder="Ej. Golf 1.6 TDI · 1234 ABC"></label>
         <div class="grid2">
           <label>Cilindros<select id="vCyl">${[1, 2, 3, 4, 5, 6, 8, 10, 12].map(n => `<option ${n == v.cylinders ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
           <label>Combustible<select id="vFuel">${['Gasolina', 'Diésel', 'Híbrido', 'GLP / GNC'].map(n => `<option ${n === v.fuel ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
         </div>
-        <p class="muted small">Motor de 4 tiempos. Si no sabes los cilindros, la mayoría de turismos tienen 4 (3 en muchos pequeños y modernos).</p>
+        <p class="muted small">Motor de 4 tiempos. Si no sabes los cilindros: la mayoría de turismos tienen 4 (3 en muchos pequeños y modernos); en motos, 1 (monocilíndricas), 2 o 4.</p>
         <div class="actions">${isNew ? '' : '<button type="button" class="btn ghost" id="vDel">Eliminar</button>'}<button class="btn primary">Guardar</button></div>
       </form>`);
     $('#vName').focus();
     $('#vf').onsubmit = async e => {
       e.preventDefault();
-      v.name = $('#vName').value.trim(); v.cylinders = +$('#vCyl').value; v.fuel = $('#vFuel').value;
+      v.name = $('#vName').value.trim(); v.type = $('#vType').value; v.cylinders = +$('#vCyl').value; v.fuel = $('#vFuel').value;
       await DB.putVehicle(v); LS.set('vehicle', v.id); closeModal(); await loadVehicles();
       if (S.view === 'ajustes') renderAjustes();
       toast('Vehículo guardado');
@@ -146,6 +150,13 @@
       await DB.delVehicle(v.id); await loadVehicles(); renderAjustes(); toast('Vehículo eliminado');
     };
   }
+
+  // ---------- guía: colocación ----------
+  function renderPlacement(type) {
+    $('#placement').innerHTML = Placement.infographic(type);
+    $$('#placeSeg button').forEach(b => b.classList.toggle('on', b.dataset.pt === type));
+  }
+  $$('#placeSeg button').forEach(b => b.onclick = () => renderPlacement(b.dataset.pt));
 
   // ---------- grabar ----------
   const CHECKS = {
@@ -161,7 +172,12 @@
   function renderChecklist() {
     const t = $('#testType').value;
     $('#testHint').textContent = HINTS[t];
-    $('#checklist').innerHTML = CHECKS[t].map((c, i) => `<li><input type="checkbox" id="ck${i}"><label for="ck${i}" style="margin:0;color:var(--text)">${esc(c)}</label></li>`).join('');
+    const vt = S.vehicle && S.vehicle.type === 'moto' ? 'moto' : 'coche';
+    const MOTO = { 'A/C, ventilador, radio y luces apagados': 'Luces y accesorios apagados', 'Puertas cerradas, nadie hablando cerca': 'Nadie hablando cerca' };
+    const items = CHECKS[t].map(c => c === 'Móvil en el punto marcado, misma orientación' ? Placement.CHECK[vt] : (vt === 'moto' && MOTO[c]) || c);
+    const was = new Set($$('#checklist li').filter(li => li.querySelector('input').checked).map(li => li.textContent));
+    $('#placeMini').innerHTML = Placement.mini(vt);
+    $('#checklist').innerHTML = items.map((c, i) => `<li><input type="checkbox" id="ck${i}" ${was.has(c) ? 'checked' : ''}><label for="ck${i}" style="margin:0;color:var(--text)">${esc(c)}</label></li>`).join('');
   }
   $('#testType').value = LS.get('testType', 'Ralentí en caliente');
   $('#duration').value = String(LS.get('duration', 20));
@@ -604,7 +620,7 @@ Escribe en español, en texto plano sin markdown, un informe breve (máx. 250 pa
   // ---------- ajustes ----------
   async function renderAjustes() {
     const all = await DB.allRecordings();
-    $('#vehList').innerHTML = S.vehicles.length ? S.vehicles.map(v => `<div class="finding" style="align-items:center"><span style="flex:1"><b>${esc(v.name)}</b><br><span class="muted small">${v.cylinders} cil. · ${esc(v.fuel)} · ${all.filter(r => r.vehicleId === v.id).length} fichas</span></span><button class="btn ghost small" data-edit="${v.id}">Editar</button></div>`).join('') : '<p class="muted">Ninguno todavía.</p>';
+    $('#vehList').innerHTML = S.vehicles.length ? S.vehicles.map(v => `<div class="finding" style="align-items:center"><span style="flex:1"><b>${esc(v.name)}</b><br><span class="muted small">${v.type === 'moto' ? 'Moto' : 'Coche'} · ${v.cylinders} cil. · ${esc(v.fuel)} · ${all.filter(r => r.vehicleId === v.id).length} fichas</span></span><button class="btn ghost small" data-edit="${v.id}">Editar</button></div>`).join('') : '<p class="muted">Ninguno todavía.</p>';
     $$('[data-edit]').forEach(b => b.onclick = () => vehicleForm(S.vehicles.find(v => v.id === b.dataset.edit)));
     $('#apiKey').value = LS.get('apiKey', '');
   }

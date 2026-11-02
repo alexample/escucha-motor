@@ -39,7 +39,8 @@
       <div class="card">
         <h2>Antes de grabar</h2>
         <ul class="checklist" id="checklist"></ul>
-        <button class="link small" data-go="guia">Ver el protocolo completo</button>
+        <div id="placeMini"></div>
+        <button class="link small" data-go="guia">Ver cómo colocar el móvil y el protocolo</button>
       </div>
 
       <button class="btn rec" id="btnRec"><span class="dot"></span> Grabar</button>
@@ -126,18 +127,17 @@
     <div class="card prose">
       <h2>Protocolo de grabación</h2>
       <p>Para que dos grabaciones se puedan comparar, lo único que debe cambiar entre ellas es el estado del motor. Todo lo demás tiene que repetirse igual.</p>
-      <h3>1. Siempre el mismo sitio</h3>
+      <h3 id="colocacion">1. Dónde colocar el móvil</h3>
+      <div class="seg" id="placeSeg">
+        <button data-pt="coche" class="on">Coche</button><button data-pt="moto">Moto</button>
+      </div>
+      <div id="placement"></div>
+      <h3>2. Siempre el mismo sitio y el mismo móvil</h3>
       <ul>
-        <li>Mismo lugar (mejor siempre el mismo garaje o siempre al aire libre: un garaje cerrado hace eco y cambia el sonido).</li>
-        <li>Coche en llano, freno de mano puesto, en punto muerto (o P en automático).</li>
-        <li>Sin viento ni lluvia; sin otros motores cerca.</li>
-      </ul>
-      <h3>2. Siempre la misma posición del móvil</h3>
-      <ul>
-        <li>Capó abierto. Elige un punto fijo y fácil de repetir: por ejemplo, apoyado sobre el travesaño delantero, centrado sobre el motor, a unos 30–40 cm de la tapa de balancines.</li>
-        <li>Marca ese punto (una pegatina o una foto de referencia) y coloca el móvil siempre igual: misma orientación, micrófono inferior apuntando al motor.</li>
-        <li>Nunca sobre piezas calientes, el ventilador o correas. Sin tocarlo durante la grabación.</li>
-        <li>Quita la funda si tapa el micrófono. Usa siempre el mismo móvil.</li>
+        <li>Mismo lugar: mejor siempre el mismo garaje o siempre al aire libre (un garaje cerrado hace eco y cambia el sonido).</li>
+        <li>Mismo suelo, sin viento ni lluvia y sin otros motores cerca.</li>
+        <li>Usa siempre el mismo móvil y quita la funda si tapa el micrófono. No lo toques durante la grabación.</li>
+        <li>Nunca lo pongas donde pueda pisarlo una rueda ni bajo el tubo de escape.</li>
       </ul>
       <h3>3. Siempre el mismo estado del motor</h3>
       <ul>
@@ -208,6 +208,7 @@
 <div id="toast" class="toast hidden"></div>
 
 <script src="analysis.js"></script>
+<script src="placement.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

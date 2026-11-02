@@ -96,3 +96,12 @@ audio { width: 100%; margin-top: 8px; }
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 20; display: flex; align-items: flex-end; justify-content: center; }
 .sheet { background: var(--card); width: 100%; max-width: 560px; border-radius: 18px 18px 0 0; padding: 18px 16px calc(18px + env(safe-area-inset-bottom)); max-height: 90vh; overflow: auto; }
 .toast { position: fixed; left: 50%; bottom: calc(86px + env(safe-area-inset-bottom)); transform: translateX(-50%); background: #2b2f36; color: var(--text); padding: 10px 16px; border-radius: 10px; z-index: 30; font-size: 14px; max-width: 90vw; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
+
+.infog svg { display: block; width: 100%; height: auto; background: #15181c; border: 1px solid var(--line); border-radius: 12px; margin: 8px 0; }
+.steps { padding-left: 22px; margin: 8px 0; }
+.steps li { margin: 6px 0; }
+.steps li::marker { color: var(--accent); font-weight: 800; }
+.seg { display: inline-flex; background: #0f1114; border: 1px solid var(--line); border-radius: 10px; padding: 3px; margin: 4px 0; }
+.seg button { background: none; border: 0; color: var(--muted); padding: 7px 18px; border-radius: 8px; font: 600 14px system-ui, sans-serif; }
+.seg button.on { background: var(--accent); color: #1a1200; }
+#placeMini .infog svg { margin: 8px auto 0; max-width: 230px; }
