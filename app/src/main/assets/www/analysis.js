@@ -74,7 +74,7 @@
     const x0 = input.subarray ? input.subarray(start, end) : input.slice(start, end);
     const N = x0.length;
     const dur = N / sr;
-    const res = { version: 1, sampleRate: sr, duration: r1(dur), cylinders: cylinders, quality: [] };
+    const res = { version: 2, sampleRate: sr, duration: r1(dur), cylinders: cylinders, quality: [] };
     if (dur < 4) { res.quality.push({ level: 'alerta', text: 'Grabación demasiado corta (mínimo 5 s).' }); }
 
     // DC y nivel
@@ -153,6 +153,14 @@
       res.spectrum.push([Math.round(Math.sqrt(fa * fb)), r1(db(e / Math.max(c, 1)) - db(total / psd.length))]);
     }
 
+    // ancho de banda útil: un corte brusco indica grabación procesada (modo llamada) o de baja calidad
+    let cliff = null;
+    for (let i = 0; i + 3 < res.spectrum.length; i++) {
+      if (res.spectrum[i][1] - res.spectrum[i + 3][1] >= 25 && res.spectrum[i][0] < 0.8 * nyq) { cliff = res.spectrum[i][0]; break; }
+    }
+    res.bandwidthHz = Math.round(cliff || Math.min(16000, nyq));
+    if (res.bandwidthHz < 7000) res.quality.push({ level: 'alerta', text: `Sonido recortado por encima de ${res.bandwidthHz} Hz: el móvil ha grabado en modo llamada o con filtros. Los agudos (golpeteos, silbidos) no se pueden analizar.` });
+
     // tonos destacados (silbidos, zumbidos) 300 Hz – 12 kHz
     const psdDb = Array.from(psd, p => db(p));
     const tones = [];
@@ -222,7 +230,7 @@
         cyc.push(s / (a1 - a0));
       }
       const md = median(cyc);
-      res.cycleCv = r2(std(cyc) / Math.max(mean(cyc), 1e-20));
+      res.cycleCv = r2(1.4826 * median(cyc.map(v => Math.abs(v - md))) / Math.max(md, 1e-20));
       const weak = cyc.filter(v => v < 0.45 * md).length;
       res.weakEventsPerMin = r1(weak / dur * 60);
       res.weakPct = r1(100 * weak / Math.max(cyc.length, 1));
@@ -232,12 +240,20 @@
     }
 
     // impulsividad en agudos (golpeteos, taqués, picado)
-    const hp = biquadHighpass(x, sr, 2000);
-    let m2 = 0, m4 = 0, hpk = 0;
-    for (let i = 0; i < N; i++) { const v = hp[i]; m2 += v * v; m4 += v * v * v * v; if (Math.abs(v) > hpk) hpk = Math.abs(v); }
-    m2 /= N; m4 /= N;
-    res.hfKurtosis = r1(m4 / Math.max(m2 * m2, 1e-30));
-    res.hfCrest = r1(hpk / Math.sqrt(Math.max(m2, 1e-30)));
+    const hp = biquadHighpass(x, sr, Math.min(2000, nyq * 0.4));
+    const wl = sr, ks = [], cs = [];
+    for (let s0 = 0; s0 + wl <= N; s0 += wl) {
+      let m2 = 0, m4 = 0, pk = 0;
+      for (let i = s0; i < s0 + wl; i++) { const v = hp[i]; const v2 = v * v; m2 += v2; m4 += v2 * v2; if (Math.abs(v) > pk) pk = Math.abs(v); }
+      m2 /= wl; m4 /= wl;
+      ks.push(m4 / Math.max(m2 * m2, 1e-30)); cs.push(pk / Math.sqrt(Math.max(m2, 1e-30)));
+    }
+    res.hfKurtosis = ks.length ? r1(median(ks)) : null;
+    res.hfCrest = cs.length ? r1(median(cs)) : null;
+
+    // ¿se puede diagnosticar con esta grabación?
+    res.reliable = !(res.levelDb < -55 || res.clipPct > 0.5 || res.bandwidthHz < 7000 || dur < 4);
+    if (res.levelDb < -55) res.quality = res.quality.map(q => q.text.startsWith('Nivel muy bajo') ? Object.assign(q, { level: 'alerta' }) : q);
     return res;
   }
 
@@ -245,7 +261,7 @@
   const LIM = {
     periodicityLow: 0.35,
     imbalanceWarn: 0.2, imbalanceAlert: 0.35,
-    cycleCvWarn: 0.3, cycleCvAlert: 0.45,
+    cycleCvWarn: 0.28, cycleCvAlert: 0.35,
     weakWarn: 6, weakAlert: 20,
     kurtWarn: 25, kurtAlert: 45,
     levelStdWarn: 1.5,
@@ -256,7 +272,10 @@
     newTone: 15
   };
 
+  const UNRELIABLE = { level: 'aviso', area: 'Fiabilidad', text: 'Esta grabación no tiene calidad suficiente: los indicadores no son fiables y no se emite diagnóstico. Repite la grabación siguiendo la guía.' };
+
   function absoluteFindings(f) {
+    if (f.reliable === false) return [Object.assign({}, UNRELIABLE)];
     const out = [];
     if (f.periodicity != null && f.periodicity < LIM.periodicityLow && f.rpm)
       out.push({ level: 'aviso', area: 'Ritmo', text: `Ritmo de combustión poco definido (regularidad ${f.periodicity}). Puede indicar ralentí inestable o una grabación con mucho ruido ajeno.` });
@@ -274,8 +293,8 @@
       if (f.weakEventsPerMin >= LIM.weakAlert) out.push({ level: 'alerta', area: 'Fallos', text: `${f.weakEventsPerMin} explosiones débiles por minuto (${f.weakPct}%): compatible con fallos de encendido o de inyección.${extra}` });
       else if (f.weakEventsPerMin >= LIM.weakWarn) out.push({ level: 'aviso', area: 'Fallos', text: `${f.weakEventsPerMin} explosiones débiles por minuto (${f.weakPct}%).` });
     }
-    if (f.hfKurtosis >= LIM.kurtAlert) out.push({ level: 'alerta', area: 'Golpeteo', text: `Golpes metálicos muy marcados en agudos (impulsividad ${f.hfKurtosis}): taqués, empujadores, cadena de distribución o picado de biela.` });
-    else if (f.hfKurtosis >= LIM.kurtWarn) out.push({ level: 'aviso', area: 'Golpeteo', text: `Golpeteo apreciable en agudos (impulsividad ${f.hfKurtosis}). En diésel o con inyectores ruidosos puede ser normal: lo importante es si crece entre grabaciones.` });
+    if (f.hfKurtosis != null && f.hfKurtosis >= LIM.kurtAlert) out.push({ level: 'alerta', area: 'Golpeteo', text: `Golpes metálicos muy marcados en agudos (impulsividad ${f.hfKurtosis}): taqués, empujadores, cadena de distribución o picado de biela.` });
+    else if (f.hfKurtosis != null && f.hfKurtosis >= LIM.kurtWarn) out.push({ level: 'aviso', area: 'Golpeteo', text: `Golpeteo apreciable en agudos (impulsividad ${f.hfKurtosis}). En diésel o con inyectores ruidosos puede ser normal: lo importante es si crece entre grabaciones.` });
     if (f.levelStdDb >= LIM.levelStdWarn) out.push({ level: 'aviso', area: 'Estabilidad', text: `El volumen oscila (±${f.levelStdDb} dB): régimen que sube y baja o ruidos ajenos durante la grabación.` });
     return out;
   }
@@ -285,6 +304,10 @@
   function compareTwo(A, B) {
     const fa = A.features, fb = B.features;
     const out = [];
+    if (fa.reliable === false || fb.reliable === false) {
+      out.push({ level: 'aviso', area: 'Fiabilidad', text: `La ficha de ${(fa.reliable === false ? A : B).km.toLocaleString('es-ES')} km no tiene calidad suficiente, así que no se sacan conclusiones de esta comparación. Las diferencias de frecuencia se muestran solo como referencia.` });
+      return out;
+    }
     if (A.testType !== B.testType) out.push({ level: 'aviso', area: 'Método', text: `Las fichas son de pruebas distintas (${A.testType} / ${B.testType}); la comparación es solo orientativa.` });
     if (A.device && B.device && A.device !== B.device) out.push({ level: 'aviso', area: 'Método', text: 'Grabadas con dispositivos distintos: las diferencias de timbre pueden deberse al micrófono.' });
 
@@ -451,6 +474,11 @@
     const lastPair = rep.pairs.filter(p => !p.global).slice(-1)[0];
     const alerts = lastAbs.filter(f => f.level === 'alerta').length + (lastPair ? lastPair.findings.filter(f => f.level === 'alerta').length : 0);
     const warns = lastAbs.filter(f => f.level === 'aviso').length + (lastPair ? lastPair.findings.filter(f => f.level === 'aviso').length : 0);
+    if (last.features.reliable === false) {
+      rep.status = 'aviso';
+      rep.summary.push('La última grabación no tiene calidad suficiente para emitir un diagnóstico. Repítela siguiendo la guía (móvil debajo del motor, sin funda).');
+      return rep;
+    }
     if (alerts) rep.status = 'alerta';
     else if (warns) rep.status = 'aviso';
     else rep.status = 'ok';

@@ -96,6 +96,13 @@
     const a = e.target.closest('[data-act="newVehicle"]'); if (a) vehicleForm();
   });
   $('#btnSettings').onclick = () => go('ajustes');
+  document.addEventListener('click', e => {
+    const b = e.target.closest('.ib'); if (!b) return;
+    e.preventDefault(); e.stopPropagation();
+    const it = Info.INFO[b.dataset.info]; if (!it) return;
+    modal(`<h2>${esc(it.t)}</h2><div class="prose infotext">${it.b}</div><button class="btn primary" id="infoOk">Entendido</button>`);
+    $('#infoOk').onclick = closeModal;
+  }, true);
 
   // ---------- vehículos ----------
   async function loadVehicles() {
@@ -111,8 +118,34 @@
     $('#recSetup').classList.toggle('hidden', !S.vehicle);
     await loadRecs();
   }
+  function wavToPcm(buf) {
+    const v = new DataView(buf);
+    let sr = v.getUint32(24, true), off = 12, dataOff = 44, len = (buf.byteLength - 44) >> 1;
+    while (off + 8 <= buf.byteLength) { // buscar el bloque 'data'
+      const id = String.fromCharCode(v.getUint8(off), v.getUint8(off + 1), v.getUint8(off + 2), v.getUint8(off + 3));
+      const sz = v.getUint32(off + 4, true);
+      if (id === 'data') { dataOff = off + 8; len = Math.min(sz, buf.byteLength - dataOff) >> 1; break; }
+      off += 8 + sz + (sz & 1);
+    }
+    const pcm = new Float32Array(len);
+    for (let i = 0; i < len; i++) pcm[i] = v.getInt16(dataOff + 2 * i, true) / 32768;
+    return { pcm, sr };
+  }
+  async function reanalyzeOld(recs) {
+    const old = recs.filter(r => !r.features || (r.features.version || 1) < 2);
+    if (!old.length) return;
+    toast(`Actualizando el análisis de ${old.length} ficha(s)…`, 4000);
+    for (const r of old) {
+      try {
+        const { pcm, sr } = wavToPcm(r.audio);
+        r.features = EM.analyze(pcm, sr, S.vehicle.cylinders);
+        await DB.putRec(r);
+      } catch (e) { /* ficha dañada: se deja como está */ }
+    }
+  }
   async function loadRecs() {
     S.recs = S.vehicle ? (await DB.recordings(S.vehicle.id)).sort((a, b) => b.km - a.km || b.date - a.date) : [];
+    await reanalyzeOld(S.recs);
     S.selected = new Set([...S.selected].filter(id => S.recs.some(r => r.id === id)));
   }
   $('#vehicleSel').onchange = async e => {
@@ -196,32 +229,65 @@
   };
   $('#btnStop').onclick = () => stopRecording(true);
 
-  async function startRecording() {
-    let stream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 } });
-    } catch (e) {
-      modal(`<h2>Sin acceso al micrófono</h2><p>Concede el permiso de micrófono a Escucha Motor en los ajustes del teléfono y vuelve a intentarlo.</p><p class="muted small">${esc(e.message || e.name)}</p><button class="btn primary" onclick="document.getElementById('modal').classList.add('hidden')">Entendido</button>`);
-      return;
+  const NATIVE = !!(Bridge && Bridge.hasNativeRecorder);
+  function micDenied(msg) {
+    modal(`<h2>Sin acceso al micrófono</h2><p>Concede el permiso de micrófono a Escucha Motor en los ajustes del teléfono y vuelve a intentarlo.</p>${msg ? `<p class="muted small">${esc(msg)}</p>` : ''}<button class="btn primary" onclick="document.getElementById('modal').classList.add('hidden')">Entendido</button>`);
+  }
+  function askMic() {
+    return new Promise(res => {
+      if (Bridge.micGranted()) return res(true);
+      window.__micResult = ok => { window.__micResult = null; res(!!ok); };
+      Bridge.requestMic();
+    });
+  }
+  function b64ToPcm(b64) {
+    const bin = atob(b64), n = bin.length >> 1, out = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      let v = bin.charCodeAt(2 * i) | (bin.charCodeAt(2 * i + 1) << 8);
+      if (v >= 0x8000) v -= 0x10000;
+      out[i] = v / 32768;
     }
-    const AC = window.AudioContext || window.webkitAudioContext;
-    const ctx = new AC();
-    if (ctx.state === 'suspended') await ctx.resume();
-    const src = ctx.createMediaStreamSource(stream);
-    const proc = ctx.createScriptProcessor(4096, 1, 1);
-    const mute = ctx.createGain(); mute.gain.value = 0;
-    src.connect(proc); proc.connect(mute); mute.connect(ctx.destination);
+    return out;
+  }
+
+  async function startRecording() {
     const dur = +$('#duration').value;
-    rec = { stream, ctx, proc, chunks: [], recording: false, clip: false, level: -90, dur, t0: 0, wave: [] };
-    proc.onaudioprocess = ev => {
-      const d = ev.inputBuffer.getChannelData(0);
-      let s = 0, pk = 0;
-      for (let i = 0; i < d.length; i++) { s += d[i] * d[i]; const a = Math.abs(d[i]); if (a > pk) pk = a; }
-      rec.level = 10 * Math.log10(s / d.length + 1e-12);
-      if (pk >= 0.99) rec.clip = true;
-      rec.wave.push(pk); if (rec.wave.length > 150) rec.wave.shift();
-      if (rec.recording) rec.chunks.push(new Float32Array(d));
-    };
+    if (NATIVE) {
+      if (!await askMic()) { micDenied(); return; }
+      const st = JSON.parse(Bridge.recStart());
+      if (!st.ok) { micDenied(st.error); return; }
+      rec = { native: true, chunks: [], recording: false, clip: false, level: -90, dur, t0: 0, wave: [], sr: st.sampleRate, source: st.source };
+      rec.poll = setInterval(() => {
+        try {
+          const l = JSON.parse(Bridge.recLevel());
+          rec.level = 20 * Math.log10((l.rms || 0) + 1e-6);
+          if (rec.recording && l.clip) rec.clip = true;
+          rec.wave.push(l.peak || 0); if (rec.wave.length > 150) rec.wave.shift();
+        } catch (e) { }
+      }, 100);
+    } else {
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 } });
+      } catch (e) { micDenied(e.message || e.name); return; }
+      const AC = window.AudioContext || window.webkitAudioContext;
+      const ctx = new AC();
+      if (ctx.state === 'suspended') await ctx.resume();
+      const src = ctx.createMediaStreamSource(stream);
+      const proc = ctx.createScriptProcessor(4096, 1, 1);
+      const mute = ctx.createGain(); mute.gain.value = 0;
+      src.connect(proc); proc.connect(mute); mute.connect(ctx.destination);
+      rec = { stream, ctx, proc, chunks: [], recording: false, clip: false, level: -90, dur, t0: 0, wave: [], sr: ctx.sampleRate, source: 'navegador' };
+      proc.onaudioprocess = ev => {
+        const d = ev.inputBuffer.getChannelData(0);
+        let s2 = 0, pk = 0;
+        for (let i = 0; i < d.length; i++) { s2 += d[i] * d[i]; const a = Math.abs(d[i]); if (a > pk) pk = a; }
+        rec.level = 10 * Math.log10(s2 / d.length + 1e-12);
+        if (pk >= 0.99) rec.clip = true;
+        rec.wave.push(pk); if (rec.wave.length > 150) rec.wave.shift();
+        if (rec.recording) rec.chunks.push(new Float32Array(d));
+      };
+    }
     if (Bridge && Bridge.keepScreenOn) Bridge.keepScreenOn(true);
     $('#recSetup').classList.add('hidden'); $('#recLive').classList.remove('hidden');
     let n = +$('#countdown').value || 3;
@@ -231,6 +297,7 @@
       n--;
       if (n > 0) { $('#recCount').textContent = n; return; }
       clearInterval(rec.timer);
+      if (rec.native) Bridge.recReset();
       rec.recording = true; rec.clip = false; rec.t0 = performance.now(); buzz(300);
       $('#recMsg').textContent = 'Grabando…';
       rec.timer = setInterval(() => {
@@ -254,24 +321,33 @@
     $('#clipTxt').classList.toggle('hidden', !rec.clip);
     rec.raf = requestAnimationFrame(drawMeter);
   }
-  function teardown() {
-    if (!rec) return;
-    clearInterval(rec.timer); cancelAnimationFrame(rec.raf);
-    try { rec.proc.disconnect(); } catch (e) { }
-    rec.stream.getTracks().forEach(t => t.stop());
-    try { rec.ctx.close(); } catch (e) { }
+  function teardown(r) {
+    clearInterval(r.timer); clearInterval(r.poll); cancelAnimationFrame(r.raf);
+    if (!r.native) {
+      try { r.proc.disconnect(); } catch (e) { }
+      r.stream.getTracks().forEach(t => t.stop());
+      try { r.ctx.close(); } catch (e) { }
+    }
     if (Bridge && Bridge.keepScreenOn) Bridge.keepScreenOn(false);
   }
   async function stopRecording(cancel) {
     if (!rec) return;
-    const r = rec; teardown(); rec = null;
+    const r = rec; rec = null; teardown(r);
     $('#recLive').classList.add('hidden');
-    if (cancel || !r.chunks.length) { $('#recSetup').classList.remove('hidden'); return; }
+    let pcm = null, sr = r.sr;
+    if (r.native) {
+      if (cancel || !r.recording) { Bridge.recCancel(); $('#recSetup').classList.remove('hidden'); return; }
+      const out = JSON.parse(Bridge.recStop());
+      pcm = b64ToPcm(out.pcm || ''); sr = out.sampleRate || sr;
+    } else {
+      if (cancel || !r.chunks.length) { $('#recSetup').classList.remove('hidden'); return; }
+      const total = r.chunks.reduce((a, c) => a + c.length, 0);
+      pcm = new Float32Array(total); let o = 0;
+      r.chunks.forEach(c => { pcm.set(c, o); o += c.length; });
+    }
     buzz([250, 150, 250]);
-    const total = r.chunks.reduce((a, c) => a + c.length, 0);
-    const pcm = new Float32Array(total); let o = 0;
-    r.chunks.forEach(c => { pcm.set(c, o); o += c.length; });
-    await processAudio(pcm, r.ctx.sampleRate, 'micrófono');
+    if (!pcm.length) { toast('No se grabó audio'); $('#recSetup').classList.remove('hidden'); return; }
+    await processAudio(pcm, sr, r.native ? 'micrófono ' + r.source : 'micrófono (navegador)');
   }
 
   $('#btnImport').onclick = () => $('#fileAudio').click();
@@ -309,9 +385,9 @@
     const features = EM.analyze(pcm, sr, S.vehicle.cylinders);
     const wav = encodeWav(pcm, sr);
     S.pending = { features, wav, sr, source };
-    const qual = features.quality.length ? features.quality.map(q => `<div class="finding"><span class="pill ${q.level}">${q.level === 'alerta' ? 'Calidad' : 'Aviso'}</span><span>${esc(q.text)}</span></div>`).join('')
+    const qual = features.quality.length ? features.quality.map(q => `<div class="finding"><span class="pill ${q.level}">${q.level === 'alerta' ? 'Calidad' : 'Aviso'}</span><span>${esc(q.text)} ${Info.btn('reliable')}</span></div>`).join('')
       : '<div class="finding"><span class="pill ok">Bien</span><span>Grabación válida para comparar.</span></div>';
-    const abs = EM.absoluteFindings(features).map(f => `<div class="finding"><span class="pill ${f.level}">${esc(f.area)}</span><span>${esc(f.text)}</span></div>`).join('');
+    const abs = EM.absoluteFindings(features).map(f => `<div class="finding"><span class="pill ${f.level}">${esc(f.area)}</span><span>${esc(f.text)} ${Info.area(f.area)}</span></div>`).join('');
     $('#saveQuality').innerHTML = qual + abs;
     $('#saveKpis').innerHTML = kpis(features);
     setPlayer($('#savePlayer'), wav);
@@ -322,10 +398,12 @@
     $('#recSave').scrollIntoView({ behavior: 'smooth' });
   }
   function kpis(f) {
-    const k = (v, l) => `<div class="kpi"><b>${v ?? '—'}</b><span>${l}</span></div>`;
-    return k(f.rpm ? f.rpm : '—', 'rpm estimadas') + k(f.periodicity != null ? Math.round(f.periodicity * 100) + '%' : '—', 'regularidad') +
-      k(f.imbalance ?? '—', 'desequilibrio cil.') + k(f.weakPct != null ? f.weakPct + '%' : '—', 'explosiones débiles') +
-      k(f.hfKurtosis, 'impulsividad agudos') + k(f.levelDb, 'nivel dBFS');
+    const k = (v, l, key) => `<div class="kpi"><b>${v ?? '—'}</b><span>${l} ${Info.btn(key)}</span></div>`;
+    return k(f.rpm ? f.rpm : '—', 'rpm estimadas', 'rpm') + k(f.periodicity != null ? Math.round(f.periodicity * 100) + '%' : '—', 'regularidad', 'periodicity') +
+      k(f.imbalance ?? '—', 'desequilibrio cil.', 'imbalance') + k(f.weakPct != null ? f.weakPct + '%' : '—', 'explosiones débiles', 'weakPct') +
+      k(f.hfKurtosis ?? '—', 'impulsividad agudos', 'hfKurtosis') + k(f.levelDb, 'nivel dBFS', 'levelDb') +
+      k(f.cycleCv != null ? Math.round(f.cycleCv * 100) + '%' : '—', 'irregularidad', 'cycleCv') + k(f.centroidHz + ' Hz', 'centro tonal', 'centroid') +
+      k(f.bandwidthHz ? (f.bandwidthHz / 1000).toLocaleString('es-ES', { maximumFractionDigits: 1 }) + ' kHz' : '—', 'ancho de banda', 'bandwidth');
   }
   let playerUrl = new Map();
   function setPlayer(el, wav) {
@@ -349,7 +427,7 @@
       reason: reason + (rt ? ' — ' + rt : ''), reasonCat: reason, reasonText: rt,
       testType: $('#testType').value, ambientC: $('#fAmbient').value === '' ? null : +$('#fAmbient').value,
       warmMin: $('#fWarm').value === '' ? null : +$('#fWarm').value, notes: $('#fNotes').value.trim(),
-      device: deviceName(), source: p.source, sampleRate: p.sr, audio: p.wav, features: p.features
+      device: deviceName(), source: p.source, bandwidthHz: p.features.bandwidthHz, sampleRate: p.sr, audio: p.wav, features: p.features
     };
     await DB.putRec(r); S.pending = null;
     await loadRecs();
@@ -414,20 +492,26 @@
         <div class="meta muted small">${new Date(r.date).toLocaleString('es-ES')} · ${esc(r.testType)}</div>
         <p><b>Motivo:</b> ${esc(r.reason)}</p>
         ${r.notes ? `<p class="small"><b>Observaciones:</b> ${esc(r.notes)}</p>` : ''}
-        <p class="muted small">${[r.ambientC != null ? r.ambientC + ' °C ambiente' : '', r.warmMin != null ? r.warmMin + ' min en marcha' : '', esc(r.device), Math.round(r.sampleRate / 100) / 10 + ' kHz', f.duration + ' s'].filter(Boolean).join(' · ')}</p>
+        <p class="muted small">${[r.ambientC != null ? r.ambientC + ' °C ambiente' : '', r.warmMin != null ? r.warmMin + ' min en marcha' : '', esc(r.device), esc(r.source || ''), Math.round(r.sampleRate / 100) / 10 + ' kHz', f.duration + ' s'].filter(Boolean).join(' · ')}</p>
         <audio id="detPlayer" controls></audio>
       </div>
-      <div class="card"><h2>Indicadores</h2><div class="kpis">${kpis(f)}</div></div>
-      <div class="card"><h2>Lo que se oye</h2>${abs.length ? abs.map(x => `<div class="finding"><span class="pill ${x.level}">${esc(x.area || 'Calidad')}</span><span>${esc(x.text)}</span></div>`).join('') : '<div class="finding"><span class="pill ok">Bien</span><span>Sin rasgos anómalos en esta grabación.</span></div>'}
-      ${f.tones.length ? `<p class="muted small">Tonos destacados: ${f.tones.map(t => t.hz + ' Hz').join(', ')}</p>` : ''}</div>
-      <div class="card"><h2>Espectro</h2><canvas class="chart" id="detChart"></canvas></div>
+      <div class="card"><h2>Indicadores</h2><p class="muted small" style="margin-top:-4px">Pulsa «i» para ver qué significa cada dato.</p><div class="kpis">${kpis(f)}</div></div>
+      <div class="card"><h2>Lo que se oye</h2>${abs.length ? abs.map(x => `<div class="finding"><span class="pill ${x.level}">${esc(x.area || 'Calidad')}</span><span>${esc(x.text)} ${Info.area(x.area || 'Calidad')}</span></div>`).join('') : '<div class="finding"><span class="pill ok">Bien</span><span>Sin rasgos anómalos en esta grabación.</span></div>'}
+      ${f.tones.length ? `<p class="muted small">Tonos destacados: ${f.tones.map(t => t.hz + ' Hz').join(', ')} ${Info.btn('tones')}</p>` : ''}</div>
+      <div class="card"><h2>Espectro ${Info.btn('spectrum')}</h2><canvas class="chart" id="detChart"></canvas></div>
       ${prev ? `<button class="btn primary" id="detCmp">Comparar con la anterior (${fmtKm(prev.km)})</button>` : ''}
+      <button class="btn ghost" id="detWav">Exportar audio (WAV)</button>
       <button class="btn ghost" id="detEdit">Editar datos</button>
       <button class="btn ghost" id="detDel" style="color:var(--alert)">Eliminar ficha</button>`;
     go('detalle');
     setPlayer($('#detPlayer'), r.audio);
     drawSpectra($('#detChart'), [{ label: fmtKm(r.km), spec: f.spectrum }]);
     if (prev) $('#detCmp').onclick = () => showReport([prev.id, r.id]);
+    $('#detWav').onclick = () => {
+      const name = `motor-${(S.vehicle ? S.vehicle.name : 'vehiculo').replace(/[^\w-]+/g, '_')}-${r.km}km-${new Date(r.date).toISOString().slice(0, 10)}.wav`;
+      if (Bridge && Bridge.saveBase64) { Bridge.saveBase64(name, 'audio/wav', abToB64(r.audio)); return; }
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([r.audio], { type: 'audio/wav' })); a.download = name; a.click();
+    };
     $('#detDel').onclick = async () => {
       if (!await confirmBox('¿Eliminar esta ficha y su audio?', 'Eliminar')) return;
       await DB.delRec(r.id); S.selected.delete(r.id); await loadRecs(); go('fichas'); toast('Ficha eliminada');
@@ -483,17 +567,17 @@
   function freqHtml(p, pi) {
     const fd = p.freq; if (!fd) return '';
     const cls = d => Math.abs(d) >= 7 ? 'alerta' : Math.abs(d) >= 4 ? 'aviso' : 'ok';
-    return `<h3>Diferencias de frecuencia</h3>
+    return `<h3>Diferencias de frecuencia ${Info.btn('diff')}</h3>
       <canvas class="chart" id="fd${pi}" style="height:170px"></canvas>
       <p class="muted small">Diferencia del espectro (${fmtKm(p.b.km)} menos ${fmtKm(p.a.km)}). Por encima de 0: esa frecuencia suena más fuerte ahora.</p>
       <div class="tblwrap"><table class="tbl">
-        <tr><th>Frecuencia</th><th>${(p.a.km / 1000).toLocaleString('es-ES', { maximumFractionDigits: 1 })}k</th><th>${(p.b.km / 1000).toLocaleString('es-ES', { maximumFractionDigits: 1 })}k</th><th>Cambio</th></tr>
-        ${fd.firing ? `<tr><td>Encendido</td><td>${String(fd.firing.a).replace('.', ',')} Hz<br><span class="muted">${fd.firing.rpmA} rpm</span></td><td>${String(fd.firing.b).replace('.', ',')} Hz<br><span class="muted">${fd.firing.rpmB} rpm</span></td><td>${sgn(fd.firing.pct)}%</td></tr>` : ''}
-        <tr><td>Centro tonal</td><td>${fd.centroid.a} Hz</td><td>${fd.centroid.b} Hz</td><td>${sgn(fd.centroid.pct)}%</td></tr>
+        <tr><th>Frecuencia ${Info.btn('bands')}</th><th>${(p.a.km / 1000).toLocaleString('es-ES', { maximumFractionDigits: 1 })}k</th><th>${(p.b.km / 1000).toLocaleString('es-ES', { maximumFractionDigits: 1 })}k</th><th>Cambio</th></tr>
+        ${fd.firing ? `<tr><td>Encendido ${Info.btn('firing')}</td><td>${String(fd.firing.a).replace('.', ',')} Hz<br><span class="muted">${fd.firing.rpmA} rpm</span></td><td>${String(fd.firing.b).replace('.', ',')} Hz<br><span class="muted">${fd.firing.rpmB} rpm</span></td><td>${sgn(fd.firing.pct)}%</td></tr>` : ''}
+        <tr><td>Centro tonal ${Info.btn('centroid')}</td><td>${fd.centroid.a} Hz</td><td>${fd.centroid.b} Hz</td><td>${sgn(fd.centroid.pct)}%</td></tr>
         ${fd.bands.map(b => `<tr><td>${b.lo >= 1000 ? b.lo / 1000 + 'k' : b.lo}–${b.hi >= 1000 ? b.hi / 1000 + 'k' : b.hi} Hz</td><td>${String(b.a).replace('.', ',')}</td><td>${String(b.b).replace('.', ',')}</td><td><span class="pill ${cls(b.d)}">${sgn(b.d)} dB</span></td></tr>`).join('')}
       </table></div>
-      ${fd.zones.length ? `<p class="small" style="margin:10px 0 4px"><b>Zonas que más cambian</b></p>${fd.zones.map(z => `<div class="finding"><span class="pill ${z.max > 0 ? (Math.abs(z.max) >= 7 ? 'alerta' : 'aviso') : 'info'}">${z.max > 0 ? 'Sube' : 'Baja'}</span><span>${esc(z.text)}</span></div>`).join('')}` : '<p class="muted small">Ninguna zona del espectro cambia 3 dB o más.</p>'}
-      ${fd.tones.length ? `<p class="small" style="margin:10px 0 4px"><b>Tonos</b></p>${fd.tones.map(t => `<div class="finding"><span class="pill ${t.kind === 'nuevo' ? 'alerta' : t.kind === 'desplazado' ? 'aviso' : 'info'}">${t.kind === 'igual' ? 'Igual' : t.kind[0].toUpperCase() + t.kind.slice(1)}</span><span>${esc(t.text)}</span></div>`).join('')}` : ''}`;
+      ${fd.zones.length ? `<p class="small" style="margin:10px 0 4px"><b>Zonas que más cambian</b> ${Info.btn('diff')}</p>${fd.zones.map(z => `<div class="finding"><span class="pill ${z.max > 0 ? (Math.abs(z.max) >= 7 ? 'alerta' : 'aviso') : 'info'}">${z.max > 0 ? 'Sube' : 'Baja'}</span><span>${esc(z.text)}</span></div>`).join('')}` : '<p class="muted small">Ninguna zona del espectro cambia 3 dB o más.</p>'}
+      ${fd.tones.length ? `<p class="small" style="margin:10px 0 4px"><b>Tonos</b> ${Info.btn('tones')}</p>${fd.tones.map(t => `<div class="finding"><span class="pill ${t.kind === 'nuevo' ? 'alerta' : t.kind === 'desplazado' ? 'aviso' : 'info'}">${t.kind === 'igual' ? 'Igual' : t.kind[0].toUpperCase() + t.kind.slice(1)}</span><span>${esc(t.text)}</span></div>`).join('')}` : ''}`;
   }
   function drawDiff(canvas, diff) {
     const dpr = window.devicePixelRatio || 1;
@@ -534,32 +618,32 @@
     S.report = rep;
     const sorted = rep.records;
     const tag = { alerta: 'Anomalía', aviso: 'Vigilar', info: 'Info' };
-    const fl = list => list.length ? list.map(f => `<div class="finding"><span class="pill ${f.level}">${tag[f.level]}</span><span><b>${esc(f.area)}.</b> ${esc(f.text)}</span></div>`).join('') : '<div class="finding"><span class="pill ok">OK</span><span>Sin diferencias relevantes.</span></div>';
-    const row = (label, fn) => `<tr><td>${label}</td>${sorted.map(r => `<td>${fn(r.features) ?? '—'}</td>`).join('')}</tr>`;
+    const fl = list => list.length ? list.map(f => `<div class="finding"><span class="pill ${f.level}">${tag[f.level]}</span><span><b>${esc(f.area)}.</b> ${esc(f.text)} ${Info.area(f.area)}</span></div>`).join('') : '<div class="finding"><span class="pill ok">OK</span><span>Sin diferencias relevantes.</span></div>';
+    const row = (label, fn, key) => `<tr><td>${label} ${key ? Info.btn(key) : ''}</td>${sorted.map(r => `<td>${fn(r.features) ?? '—'}</td>`).join('')}</tr>`;
     const statusTxt = { ok: 'Sin anomalías', aviso: 'Aspectos a vigilar', alerta: 'Anomalías detectadas' };
     $('#reportBody').innerHTML = `
       <button class="link" data-go="fichas">‹ Fichas</button>
       <div class="status ${rep.status}">${statusTxt[rep.status]}<div style="font-weight:400;margin-top:6px">${rep.summary.map(esc).join('<br>')}</div></div>
-      <div class="card"><h2>Espectros superpuestos</h2><canvas class="chart" id="repChart"></canvas>
+      <div class="card"><h2>Espectros superpuestos ${Info.btn('spectrum')}</h2><canvas class="chart" id="repChart"></canvas>
         <div class="legend">${sorted.map((r, i) => `<span><i style="background:${COLORS[i % COLORS.length]}"></i>${fmtKm(r.km)}</span>`).join('')}</div>
         <p class="muted small">Curvas normalizadas: se compara la forma del sonido, no el volumen.</p></div>
       <div class="card"><h2>Evolución</h2><div class="tblwrap"><table class="tbl">
         <tr><th></th>${sorted.map(r => `<th>${(r.km / 1000).toLocaleString('es-ES', { maximumFractionDigits: 1 })}k km</th>`).join('')}</tr>
         <tr><td>Fecha</td>${sorted.map(r => `<td>${new Date(r.date).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: '2-digit' })}</td>`).join('')}</tr>
-        ${row('rpm', f => f.rpm)}
-        ${row('Regularidad', f => f.periodicity != null ? Math.round(f.periodicity * 100) + '%' : null)}
-        ${row('Desequilibrio', f => f.imbalance)}
-        ${row('Irregularidad', f => f.cycleCv != null ? Math.round(f.cycleCv * 100) + '%' : null)}
-        ${row('Expl. débiles', f => f.weakPct != null ? f.weakPct + '%' : null)}
-        ${row('Impulsividad', f => f.hfKurtosis)}
-        ${row('Centro tonal', f => f.centroidHz + ' Hz')}
-        ${row('Nivel', f => f.levelDb + ' dB')}
+        ${row('rpm', f => f.rpm, 'rpm')}
+        ${row('Regularidad', f => f.periodicity != null ? Math.round(f.periodicity * 100) + '%' : null, 'periodicity')}
+        ${row('Desequilibrio', f => f.imbalance, 'imbalance')}
+        ${row('Irregularidad', f => f.cycleCv != null ? Math.round(f.cycleCv * 100) + '%' : null, 'cycleCv')}
+        ${row('Expl. débiles', f => f.weakPct != null ? f.weakPct + '%' : null, 'weakPct')}
+        ${row('Impulsividad', f => f.hfKurtosis, 'hfKurtosis')}
+        ${row('Centro tonal', f => f.centroidHz + ' Hz', 'centroid')}
+        ${row('Nivel', f => f.levelDb + ' dB', 'levelDb')}
       </table></div></div>
       ${rep.pairs.map((p, pi) => `<div class="card"><h2>${p.global ? 'Evolución total' : 'Cambios'} ${fmtKm(p.a.km)} → ${fmtKm(p.b.km)}</h2>
         <p class="muted small">${esc(p.b.reason)}</p>${fl(p.findings)}${freqHtml(p, pi)}</div>`).join('')}
-      ${rep.trends.length ? `<div class="card"><h2>Tendencias</h2>${rep.trends.map(t => `<div class="finding"><span class="pill ${t.worse ? 'aviso' : 'info'}">${t.worse ? 'Empeora' : 'Cambio'}</span><span>${esc(t.text)}</span></div>`).join('')}</div>` : ''}
-      <div class="card"><h2>Rasgos anómalos por grabación</h2>${rep.absolute.length ? rep.absolute.map(f => `<div class="finding"><span class="pill ${f.level}">${fmtKm(f.rec.km)}</span><span><b>${esc(f.area)}.</b> ${esc(f.text)}</span></div>`).join('') : '<p class="muted">Ninguno.</p>'}
-      ${rep.quality.length ? '<h3>Calidad de grabación</h3>' + rep.quality.map(q => `<div class="finding"><span class="pill ${q.level}">${fmtKm(q.rec.km)}</span><span>${esc(q.text)}</span></div>`).join('') : ''}</div>
+      ${rep.trends.length ? `<div class="card"><h2>Tendencias</h2>${rep.trends.map(t => `<div class="finding"><span class="pill ${t.worse ? 'aviso' : 'info'}">${t.worse ? 'Empeora' : 'Cambio'}</span><span>${esc(t.text)} ${Info.btn(t.key)}</span></div>`).join('')}</div>` : ''}
+      <div class="card"><h2>Rasgos anómalos por grabación</h2>${rep.absolute.length ? rep.absolute.map(f => `<div class="finding"><span class="pill ${f.level}">${fmtKm(f.rec.km)}</span><span><b>${esc(f.area)}.</b> ${esc(f.text)} ${Info.area(f.area)}</span></div>`).join('') : '<p class="muted">Ninguno.</p>'}
+      ${rep.quality.length ? '<h3>Calidad de grabación</h3>' + rep.quality.map(q => `<div class="finding"><span class="pill ${q.level}">${fmtKm(q.rec.km)}</span><span>${esc(q.text)} ${Info.btn('reliable')}</span></div>`).join('') : ''}</div>
       <div class="card" id="aiCard"><h2>Interpretación de Claude</h2><div id="aiOut" class="ai muted small">${LS.get('apiKey', '') ? 'Pide una interpretación redactada a partir de estos datos.' : 'Añade tu clave API en Ajustes para obtener una interpretación redactada por Claude.'}</div>
         ${LS.get('apiKey', '') ? '<button class="btn ghost" id="btnAI">Generar interpretación</button>' : '<button class="btn ghost" data-go="ajustes">Ir a Ajustes</button>'}</div>
       <p class="muted small">Informe orientativo basado solo en el sonido; no sustituye el diagnóstico de un mecánico.</p>
@@ -646,7 +730,7 @@ Escribe en español, en texto plano sin markdown, un informe breve (máx. 250 pa
     if (Bridge && Bridge.saveFile) { Bridge.saveFile(name, 'application/json', json); return; }
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([json], { type: 'application/json' })); a.download = name; a.click();
   };
-  window.__saved = ok => toast(ok ? 'Copia guardada' : 'No se guardó la copia');
+  window.__saved = ok => toast(ok ? 'Archivo guardado' : 'No se guardó el archivo');
   $('#btnImportBk').onclick = () => $('#fileBackup').click();
   $('#fileBackup').onchange = async e => {
     const f = e.target.files[0]; e.target.value = ''; if (!f) return;

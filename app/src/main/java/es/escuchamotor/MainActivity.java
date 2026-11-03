@@ -36,7 +36,8 @@ public class MainActivity extends Activity {
     private WebView web;
     private PermissionRequest pendingPermission;
     private ValueCallback<Uri[]> fileCallback;
-    private String pendingSaveContent;
+    private byte[] pendingSaveBytes;
+    private NativeRecorder recorder;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -119,6 +120,7 @@ public class MainActivity extends Activity {
             }
         });
 
+        recorder = new NativeRecorder(this);
         web.addJavascriptInterface(new Bridge(), "AndroidBridge");
 
         if (savedInstanceState != null) web.restoreState(savedInstanceState);
@@ -133,6 +135,11 @@ public class MainActivity extends Activity {
 
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        if (requestCode == REQ_MIC && pendingPermission == null) {
+            boolean ok = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+            web.evaluateJavascript("window.__micResult && window.__micResult(" + ok + ")", null);
+            return;
+        }
         if (requestCode == REQ_MIC && pendingPermission != null) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 pendingPermission.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
@@ -156,20 +163,26 @@ public class MainActivity extends Activity {
         }
         if (requestCode == REQ_SAVE) {
             boolean ok = false;
-            if (resultCode == RESULT_OK && data != null && data.getData() != null && pendingSaveContent != null) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null && pendingSaveBytes != null) {
                 try (OutputStream os = getContentResolver().openOutputStream(data.getData())) {
                     if (os != null) {
-                        os.write(pendingSaveContent.getBytes(StandardCharsets.UTF_8));
+                        os.write(pendingSaveBytes);
                         ok = true;
                     }
                 } catch (Exception ignored) {
                 }
             }
-            pendingSaveContent = null;
+            pendingSaveBytes = null;
             web.evaluateJavascript("window.__saved && window.__saved(" + ok + ")", null);
             return;
         }
         super.onActivityResult(requestCode, resultCode, data);
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (recorder != null) recorder.cancel();
+        super.onDestroy();
     }
 
     @Override
@@ -199,7 +212,44 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void saveFile(String name, String mime, String content) {
-            pendingSaveContent = content;
+            askSave(name, mime, content.getBytes(StandardCharsets.UTF_8));
+        }
+
+        @JavascriptInterface
+        public void saveBase64(String name, String mime, String b64) {
+            askSave(name, mime, android.util.Base64.decode(b64, android.util.Base64.DEFAULT));
+        }
+
+        @JavascriptInterface
+        public boolean hasNativeRecorder() { return true; }
+
+        @JavascriptInterface
+        public boolean micGranted() {
+            return checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
+        }
+
+        @JavascriptInterface
+        public void requestMic() {
+            runOnUiThread(() -> requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_MIC));
+        }
+
+        @JavascriptInterface
+        public String recStart() { return recorder.start(); }
+
+        @JavascriptInterface
+        public void recReset() { recorder.reset(); }
+
+        @JavascriptInterface
+        public String recLevel() { return recorder.level(); }
+
+        @JavascriptInterface
+        public String recStop() { return recorder.stop(); }
+
+        @JavascriptInterface
+        public void recCancel() { recorder.cancel(); }
+
+        private void askSave(String name, String mime, byte[] bytes) {
+            pendingSaveBytes = bytes;
             Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
             i.addCategory(Intent.CATEGORY_OPENABLE);
             i.setType(mime);
