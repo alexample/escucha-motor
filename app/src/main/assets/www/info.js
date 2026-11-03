@@ -109,6 +109,44 @@
         <p>Una buena grabación llega hasta 15–20 kHz. Si el sonido se corta de golpe por debajo de 7 kHz, el móvil ha aplicado su procesado de voz (el mismo de las llamadas), que además borra los ruidos continuos como el del motor. Con esas grabaciones no se emite diagnóstico.</p>
         <p class="muted">La app graba con el micrófono en modo «sin procesar» cuando el móvil lo permite. Si aun así aparece este aviso, quita la funda, desconecta auriculares Bluetooth y vuelve a grabar.</p>`
     },
+    hfImbalance: {
+      t: 'Ruido agudo de un solo cilindro',
+      b: `<p>Indica si los ruidos agudos (2–8 kHz: tics, chasquidos, soplidos) salen de <b>un único cilindro</b> en lugar de repartirse por igual.</p>
+        <p><b>Cómo se calcula:</b> se aíslan los agudos, se mide cómo sube y baja su volumen y se busca si se repite una vez por ciclo completo del motor (cada dos vueltas) en vez de con cada explosión. Si un cilindro tiene un ruido propio, aparece ese patrón.</p>
+        <p><b>Valores orientativos:</b> por debajo de 0,08 es normal; de 0,08 a 0,15, vigilar; por encima de 0,15, hay un cilindro con ruido propio claro.</p>
+        <p><b>Qué puede ser:</b> un taqué o una válvula con holgura, un inyector ruidoso, la junta de un inyector que sopla o una fuga en el colector de escape junto a ese cilindro. Si además ese cilindro pierde fuerza (desequilibrio alto), apunta más a un fallo de encendido.</p>`
+    },
+    rotKnock: {
+      t: 'Golpe grave una vez por vuelta',
+      b: `<p>Busca un golpe en graves y medios (100–1.000 Hz) que se repita <b>una vez por cada vuelta del cigüeñal</b>, que es el ritmo de un cojinete de biela o de bancada dañado.</p>
+        <p><b>Cómo se calcula:</b> se aísla esa banda, se extrae cómo sube y baja su volumen y se compara la fuerza del ritmo «por vuelta» con la del ritmo de las explosiones.</p>
+        <p><b>Valores orientativos:</b> por debajo de 0,3 es normal. Por encima, y si además los graves son impulsivos (golpes secos), es compatible con biela o bancada. Si a la vez hay desequilibrio de cilindros, es más probable un fallo de encendido.</p>
+        <p class="muted">Un golpe de biela es una avería grave: comprueba el aceite y no fuerces el motor hasta revisarlo. En motores de 1 o 2 cilindros no se calcula.</p>`
+    },
+    lfKurtosis: {
+      t: 'Impulsividad en graves',
+      b: `<p>Igual que la impulsividad en agudos, pero en la banda de 100 a 1.000 Hz: mide si hay golpes secos y sordos en lugar de un sonido continuo.</p>
+        <p><b>Valores orientativos:</b> en motores sanos suele estar por debajo de 11. Por encima de 12 hay golpes graves claros.</p>
+        <p><b>Qué puede ser:</b> biela o bancada (si además se repite una vez por vuelta), volante bimasa (cambia al pisar el embrague), soportes del motor, polea del cigüeñal o, solo en frío, cacheteo de pistón.</p>`
+    },
+    rpmHuntPct: {
+      t: 'Oscilación del ralentí',
+      b: `<p>Mide cuánto suben y bajan las revoluciones durante la grabación, calculándolas cada segundo.</p>
+        <p><b>Valores orientativos:</b> por debajo de ±1,5% el ralentí es estable; de 1,5% a 3% oscila; por encima de 3% «se embala y se cae».</p>
+        <p><b>Causas habituales:</b> toma de aire (manguitos de vacío), mariposa sucia, válvula de ralentí, sensor de temperatura, EGR. Durante el primer minuto tras arrancar en frío es normal que oscile.</p>`
+    },
+    hiss: {
+      t: 'Siseo',
+      b: `<p>Mide si en los agudos (3–8 kHz) hay un ruido de tipo «soplido» uniforme, como el del aire o los gases que se escapan, en lugar de tonos o golpes.</p>
+        <p>Solo se usa al comparar fichas: si el siseo y la energía en agudos suben, apunta a una toma de aire, una fuga de escape o un manguito del turbo.</p>`
+    },
+    causes: {
+      t: 'Posibles averías',
+      b: `<p>La app compara los indicadores de la grabación (y los cambios respecto a la ficha anterior del mismo tipo) con un catálogo de unas 30 averías que producen ruido.</p>
+        <ul><li><b>Muy compatible:</b> los indicios encajan bien con esa avería.</li><li><b>Compatible:</b> encajan, pero hay otras causas posibles.</li><li><b>Posible:</b> solo algunos indicios.</li></ul>
+        <p>Varias averías suenan parecido (por ejemplo, un taqué y la junta de un inyector), por eso se listan juntas. Es una pista para saber por dónde empezar, <b>no un diagnóstico</b>. Pulsa la «i» de cada una para ver cómo confirmarla.</p>
+        <p class="muted">Algunas averías (picado por detonación, A/C, embrague) no se pueden detectar con el vehículo parado; están en la guía como referencia.</p>`
+    },
     reliable: {
       t: 'Fiabilidad de la grabación',
       b: `<p>Antes de diagnosticar, la app comprueba que la grabación tenga calidad suficiente:</p>
@@ -125,7 +163,8 @@
   const AREA = {
     'Cilindros': 'imbalance', 'Ralentí': 'cycleCv', 'Fallos': 'weakPct', 'Golpeteo': 'hfKurtosis', 'Estabilidad': 'levelStd',
     'Ritmo': 'periodicity', 'Régimen': 'rpm', 'Timbre': 'bands', 'Volumen': 'levelDb', 'Tono nuevo': 'tones', 'Tono': 'tones',
-    'Tono desplazado': 'tones', 'Fiabilidad': 'reliable', 'Calidad': 'reliable'
+    'Tono desplazado': 'tones', 'Fiabilidad': 'reliable', 'Calidad': 'reliable',
+    'Un cilindro': 'hfImbalance', 'Golpe grave': 'rotKnock', 'Golpes graves': 'lfKurtosis', 'Ralentí oscila': 'rpmHuntPct', 'Siseo': 'hiss'
   };
   const btn = key => INFO[key] ? `<button type="button" class="ib" data-info="${key}" aria-label="Más información">i</button>` : '';
   root.Info = { INFO, AREA, btn, area: a => btn(AREA[a]) };

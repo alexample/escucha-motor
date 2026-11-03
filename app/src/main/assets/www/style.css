@@ -111,3 +111,11 @@ h2 .ib, h3 .ib { width: 20px; height: 20px; font-size: 12px; }
 .kpi span .ib { width: 16px; height: 16px; font-size: 10px; }
 .infotext p { margin: 8px 0; font-size: 15px; }
 .infotext ul { font-size: 15px; }
+
+details.fault { border-bottom: 1px solid var(--line); padding: 8px 0; }
+details.fault summary { display: flex; justify-content: space-between; gap: 10px; align-items: center; cursor: pointer; list-style: none; font-size: 15px; }
+details.fault summary::-webkit-details-marker { display: none; }
+details.fault summary span:first-child::before { content: '▸ '; color: var(--accent); }
+details.fault[open] summary span:first-child::before { content: '▾ '; }
+details.fault .pill { flex: none; }
+details.fault p { font-size: 14px; margin: 6px 0; }

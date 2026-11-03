@@ -80,7 +80,7 @@
     $$('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.go === view || (view === 'detalle' || view === 'informe') && b.dataset.go === 'fichas'));
     if (view === 'fichas') renderFichas();
     if (view === 'ajustes') renderAjustes();
-    if (view === 'guia') renderPlacement(S.vehicle && S.vehicle.type === 'moto' ? 'moto' : 'coche');
+    if (view === 'guia') { renderPlacement(S.vehicle && S.vehicle.type === 'moto' ? 'moto' : 'coche'); renderCatalog(); }
     if (view === 'grabar') renderChecklist();
     window.scrollTo(0, 0);
     if (Bridge && Bridge.setCanGoBack) Bridge.setCanGoBack(view !== 'grabar');
@@ -99,6 +99,11 @@
   document.addEventListener('click', e => {
     const b = e.target.closest('.ib'); if (!b) return;
     e.preventDefault(); e.stopPropagation();
+    if (b.dataset.fault) {
+      const F = Faults.FAULTS.find(x => x.id === b.dataset.fault); if (!F) return;
+      modal(`<h2>${esc(F.name)}</h2><div class="prose infotext">${Faults.detailHtml(F.id, esc)}</div><button class="btn primary" id="infoOk">Entendido</button>`);
+      $('#infoOk').onclick = closeModal; return;
+    }
     const it = Info.INFO[b.dataset.info]; if (!it) return;
     modal(`<h2>${esc(it.t)}</h2><div class="prose infotext">${it.b}</div><button class="btn primary" id="infoOk">Entendido</button>`);
     $('#infoOk').onclick = closeModal;
@@ -132,7 +137,7 @@
     return { pcm, sr };
   }
   async function reanalyzeOld(recs) {
-    const old = recs.filter(r => !r.features || (r.features.version || 1) < 2);
+    const old = recs.filter(r => !r.features || (r.features.version || 1) < 3);
     if (!old.length) return;
     toast(`Actualizando el análisis de ${old.length} ficha(s)…`, 4000);
     for (const r of old) {
@@ -403,6 +408,8 @@
       k(f.imbalance ?? '—', 'desequilibrio cil.', 'imbalance') + k(f.weakPct != null ? f.weakPct + '%' : '—', 'explosiones débiles', 'weakPct') +
       k(f.hfKurtosis ?? '—', 'impulsividad agudos', 'hfKurtosis') + k(f.levelDb, 'nivel dBFS', 'levelDb') +
       k(f.cycleCv != null ? Math.round(f.cycleCv * 100) + '%' : '—', 'irregularidad', 'cycleCv') + k(f.centroidHz + ' Hz', 'centro tonal', 'centroid') +
+      k(f.hfImbalance ?? '—', 'ruido 1 cilindro', 'hfImbalance') + k(f.rotKnock ?? '—', 'golpe por vuelta', 'rotKnock') +
+      k(f.lfKurtosis ?? '—', 'impulsividad graves', 'lfKurtosis') + k(f.rpmHuntPct != null ? '±' + f.rpmHuntPct + '%' : '—', 'oscilación ralentí', 'rpmHuntPct') +
       k(f.bandwidthHz ? (f.bandwidthHz / 1000).toLocaleString('es-ES', { maximumFractionDigits: 1 }) + ' kHz' : '—', 'ancho de banda', 'bandwidth');
   }
   let playerUrl = new Map();
@@ -498,6 +505,7 @@
       <div class="card"><h2>Indicadores</h2><p class="muted small" style="margin-top:-4px">Pulsa «i» para ver qué significa cada dato.</p><div class="kpis">${kpis(f)}</div></div>
       <div class="card"><h2>Lo que se oye</h2>${abs.length ? abs.map(x => `<div class="finding"><span class="pill ${x.level}">${esc(x.area || 'Calidad')}</span><span>${esc(x.text)} ${Info.area(x.area || 'Calidad')}</span></div>`).join('') : '<div class="finding"><span class="pill ok">Bien</span><span>Sin rasgos anómalos en esta grabación.</span></div>'}
       ${f.tones.length ? `<p class="muted small">Tonos destacados: ${f.tones.map(t => t.hz + ' Hz').join(', ')} ${Info.btn('tones')}</p>` : ''}</div>
+      ${causesHtml(Faults.diagnose(f, prev ? prev.features : null, { fuel: S.vehicle && S.vehicle.fuel, testType: r.testType }), f)}
       <div class="card"><h2>Espectro ${Info.btn('spectrum')}</h2><canvas class="chart" id="detChart"></canvas></div>
       ${prev ? `<button class="btn primary" id="detCmp">Comparar con la anterior (${fmtKm(prev.km)})</button>` : ''}
       <button class="btn ghost" id="detWav">Exportar audio (WAV)</button>
@@ -529,6 +537,25 @@
         await DB.putRec(r); closeModal(); await loadRecs(); showDetail(r.id);
       };
     };
+  }
+
+  // ---------- posibles averías ----------
+  function causesHtml(list, f) {
+    if (f && f.reliable === false) return `<div class="card"><h2>Posibles averías ${Info.btn('causes')}</h2><p class="muted">No se evalúan porque la grabación no tiene calidad suficiente.</p></div>`;
+    const cls = sc => sc >= 0.6 ? 'alerta' : sc >= 0.45 ? 'aviso' : 'info';
+    return `<div class="card"><h2>Posibles averías ${Info.btn('causes')}</h2>
+      ${list.length ? list.map(c => `<div class="finding"><span class="pill ${cls(c.score)}">${Faults.likelihood(c.score)}</span>
+        <span><b>${esc(c.name)}</b> <button type="button" class="ib" data-fault="${c.id}" aria-label="Ver avería">i</button><br>
+        <span class="muted small">${esc(c.sys)} · urgencia ${c.urg}</span><br><span class="small">Indicios: ${esc(c.ev.join('; '))}.</span></span></div>`).join('')
+        : '<p class="muted">Ninguna avería del catálogo encaja con este sonido.</p>'}
+      <p class="muted small">Orientativo: varias averías suenan parecido. Confírmalo en el taller.</p></div>`;
+  }
+  function renderCatalog() {
+    const box = $('#faultCatalog'); if (!box || box.dataset.done) return;
+    const det = { 'sí': 'ok', 'parcial': 'aviso', 'no': 'info' };
+    box.innerHTML = Object.entries(Faults.SYS).map(([k, name]) => `<h3>${esc(name)}</h3>` +
+      Faults.FAULTS.filter(F => F.sys === k).map(F => `<details class="fault"><summary><span>${esc(F.name)}</span><span class="pill ${det[F.det]}">${F.det === 'sí' ? 'Detecta' : F.det === 'parcial' ? 'Parcial' : 'No detecta'}</span></summary>${Faults.detailHtml(F.id, esc)}</details>`).join('')).join('');
+    box.dataset.done = '1';
   }
 
   // ---------- gráficas ----------
@@ -624,6 +651,7 @@
     $('#reportBody').innerHTML = `
       <button class="link" data-go="fichas">‹ Fichas</button>
       <div class="status ${rep.status}">${statusTxt[rep.status]}<div style="font-weight:400;margin-top:6px">${rep.summary.map(esc).join('<br>')}</div></div>
+      ${rep.causes ? causesHtml(rep.causes, sorted[sorted.length - 1].features).replace('<h2>Posibles averías', `<h2>Posibles averías · ${fmtKm(sorted[sorted.length - 1].km)}`) : ''}
       <div class="card"><h2>Espectros superpuestos ${Info.btn('spectrum')}</h2><canvas class="chart" id="repChart"></canvas>
         <div class="legend">${sorted.map((r, i) => `<span><i style="background:${COLORS[i % COLORS.length]}"></i>${fmtKm(r.km)}</span>`).join('')}</div>
         <p class="muted small">Curvas normalizadas: se compara la forma del sonido, no el volumen.</p></div>
@@ -636,6 +664,10 @@
         ${row('Irregularidad', f => f.cycleCv != null ? Math.round(f.cycleCv * 100) + '%' : null, 'cycleCv')}
         ${row('Expl. débiles', f => f.weakPct != null ? f.weakPct + '%' : null, 'weakPct')}
         ${row('Impulsividad', f => f.hfKurtosis, 'hfKurtosis')}
+        ${row('Ruido 1 cilindro', f => f.hfImbalance, 'hfImbalance')}
+        ${row('Golpe por vuelta', f => f.rotKnock, 'rotKnock')}
+        ${row('Imp. graves', f => f.lfKurtosis, 'lfKurtosis')}
+        ${row('Oscil. ralentí', f => f.rpmHuntPct != null ? '±' + f.rpmHuntPct + '%' : null, 'rpmHuntPct')}
         ${row('Centro tonal', f => f.centroidHz + ' Hz', 'centroid')}
         ${row('Nivel', f => f.levelDb + ' dB', 'levelDb')}
       </table></div></div>
@@ -680,7 +712,7 @@
 
 Vehículo: ${rep.vehicle.name}, ${rep.vehicle.cylinders} cilindros, ${rep.vehicle.fuel}, 4 tiempos.
 
-Significado de los indicadores: rpm = estimadas por el ritmo de explosiones; periodicity (0-1) = regularidad del ritmo; imbalance = energía en subarmónicos del ciclo frente a la frecuencia de encendido (sube si un cilindro quema distinto; sano < 0,2); cycleCv = variación de energía entre explosiones; weakPct = % de explosiones débiles; hfKurtosis = impulsividad por encima de 2 kHz (golpes metálicos; compárese entre grabaciones); bands = nivel relativo por bandas en dB; tones = tonos prominentes (Hz, dB sobre el fondo); levelDb = nivel global (depende de la posición).
+Significado de los indicadores: rpm = estimadas por el ritmo de explosiones; periodicity (0-1) = regularidad del ritmo; imbalance = energía en subarmónicos del ciclo frente a la frecuencia de encendido (sube si un cilindro quema distinto; sano < 0,2); cycleCv = variación de energía entre explosiones; weakPct = % de explosiones débiles; hfKurtosis = impulsividad por encima de 2 kHz (golpes metálicos; compárese entre grabaciones); hfImbalance = ruido agudo que sale de un solo cilindro (normal < 0,08); rotKnock = golpe grave una vez por vuelta (normal < 0,3); lfKurtosis = impulsividad 100–1000 Hz (normal < 11); rpmHuntPct = oscilación del ralentí en %; reliable = si la grabación es fiable; bands = nivel relativo por bandas en dB; tones = tonos prominentes (Hz, dB sobre el fondo); levelDb = nivel global (depende de la posición).
 
 Datos:
 ${JSON.stringify(data)}

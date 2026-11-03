@@ -56,6 +56,53 @@
     return y;
   }
 
+  function biquadLowpass(x, sr, fc) {
+    const w0 = 2 * Math.PI * fc / sr, q = Math.SQRT1_2;
+    const alpha = Math.sin(w0) / (2 * q), cw = Math.cos(w0);
+    const a0 = 1 + alpha;
+    const b0 = (1 - cw) / 2 / a0, b1 = (1 - cw) / a0, b2 = b0;
+    const a1 = -2 * cw / a0, a2 = (1 - alpha) / a0;
+    const y = new Float32Array(x.length);
+    let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+    for (let i = 0; i < x.length; i++) {
+      const v = b0 * x[i] + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+      x2 = x1; x1 = x[i]; y2 = y1; y1 = v; y[i] = v;
+    }
+    return y;
+  }
+  // filtro paso banda de 4º orden (dos pasadas de cada)
+  function bandpass(x, sr, lo, hi) {
+    let y = biquadHighpass(x, sr, lo); y = biquadHighpass(y, sr, lo);
+    y = biquadLowpass(y, sr, hi); return biquadLowpass(y, sr, hi);
+  }
+  // envolvente RMS muestreada a ~1 kHz
+  function envelope(x, sr) {
+    const ehop = Math.round(sr / 1000), ewin = ehop * 2, env = [];
+    for (let i = 0; i + ewin <= x.length; i += ehop) {
+      let s = 0; for (let k = i; k < i + ewin; k++) s += x[k] * x[k];
+      env.push(Math.sqrt(s / ewin));
+    }
+    return { env, es: sr / ehop };
+  }
+  // amplitud del espectro de la envolvente cerca de unas frecuencias
+  function envPeaks(env, es) {
+    const m = mean(env), n = env.length;
+    const L2 = 1 << Math.ceil(Math.log2(Math.max(n, 2048)));
+    const er = new Float64Array(L2), ei = new Float64Array(L2);
+    for (let i = 0; i < n; i++) er[i] = (env[i] - m) * (0.5 - 0.5 * Math.cos(2 * Math.PI * i / (n - 1)));
+    fft(er, ei);
+    return f => { const k = Math.round(f * L2 / es); let mx = 0; for (let j = k - 2; j <= k + 2; j++) if (j > 0 && j < L2 / 2) mx = Math.max(mx, Math.hypot(er[j], ei[j])); return mx; };
+  }
+  function windowKurtosis(y, sr) {
+    const wl = sr, ks = [];
+    for (let s0 = 0; s0 + wl <= y.length; s0 += wl) {
+      let m2 = 0, m4 = 0;
+      for (let i = s0; i < s0 + wl; i++) { const v2 = y[i] * y[i]; m2 += v2; m4 += v2 * v2; }
+      m2 /= wl; m4 /= wl; ks.push(m4 / Math.max(m2 * m2, 1e-30));
+    }
+    return ks.length ? median(ks) : null;
+  }
+
   const BANDS = [
     { id: 'b1', name: 'Graves profundos', lo: 20, hi: 100, desc: 'pulsos de combustión, escape, soportes' },
     { id: 'b2', name: 'Graves', lo: 100, hi: 300, desc: 'escape, cuerpo del motor' },
@@ -74,7 +121,7 @@
     const x0 = input.subarray ? input.subarray(start, end) : input.slice(start, end);
     const N = x0.length;
     const dur = N / sr;
-    const res = { version: 2, sampleRate: sr, duration: r1(dur), cylinders: cylinders, quality: [] };
+    const res = { version: 3, sampleRate: sr, duration: r1(dur), cylinders: cylinders, quality: [] };
     if (dur < 4) { res.quality.push({ level: 'alerta', text: 'Grabación demasiado corta (mínimo 5 s).' }); }
 
     // DC y nivel
@@ -142,6 +189,11 @@
     }
     res.centroidHz = Math.round(cn / Math.max(cd, 1e-20));
     res.flatness = r2(Math.exp(lg / cnt) / (ar / cnt));
+    { // planitud en 3–8 kHz: alta = siseo de ruido (aire, gases); baja = tonos o golpes
+      let l2 = 0, a2 = 0, c2 = 0;
+      for (let k = Math.ceil(3000 / df); k < psd.length && k * df <= Math.min(8000, nyq * 0.9); k++) { l2 += Math.log(psd[k] + 1e-20); a2 += psd[k]; c2++; }
+      res.hissFlatness = c2 ? r2(Math.exp(l2 / c2) / (a2 / c2)) : null;
+    }
 
     // espectro reducido para gráficas (puntos logarítmicos 30 Hz – 16 kHz)
     const pts = 96, fmin = 30, fmax = Math.min(16000, nyq * 0.98);
@@ -197,7 +249,14 @@
     for (let L = lagMin; L < lagMax; L++) if (ac[L] > ac[L - 1] && ac[L] >= ac[L + 1] && ac[L] > best) { best = ac[L]; bestL = L; }
     // preferir el periodo más corto con un pico casi igual de fuerte (evita submúltiplos)
     for (let L = lagMin; L < bestL; L++) {
-      if (ac[L] > ac[L - 1] && ac[L] >= ac[L + 1] && ac[L] >= 0.8 * best && Math.abs(bestL / L - Math.round(bestL / L)) < 0.12) { bestL = L; best = ac[L]; break; }
+      if (ac[L] > ac[L - 1] && ac[L] >= ac[L + 1] && ac[L] >= 0.5 * best && Math.abs(bestL / L - Math.round(bestL / L)) < 0.12) { bestL = L; best = ac[L]; break; }
+    }
+    // un golpe una vez por vuelta puede dominar el ritmo: un ralentí por debajo de 550 rpm es improbable
+    if (bestL > 0 && es / bestL * 120 / cylinders < 550) {
+      const h = bestL / 2;
+      let hb = -1, hl = 0;
+      for (let L = Math.max(lagMin, Math.floor(h * 0.85)); L <= Math.ceil(h * 1.15); L++) if (ac[L] > ac[L - 1] && ac[L] >= ac[L + 1] && ac[L] > hb) { hb = ac[L]; hl = L; }
+      if (hl && hb >= 0.2) { bestL = hl; best = Math.max(hb, best * 0.8); }
     }
     res.periodicity = r2(Math.max(0, best));
     if (bestL > 0 && best > 0.15) {
@@ -251,6 +310,42 @@
     res.hfKurtosis = ks.length ? r1(median(ks)) : null;
     res.hfCrest = cs.length ? r1(median(cs)) : null;
 
+    // ---- detectores específicos de averías ----
+    res.hfImbalance = null; res.rotKnock = null; res.lfKurtosis = null; res.rpmHuntPct = null;
+    const lf = bandpass(x, sr, 100, 1000);
+    res.lfKurtosis = r1(windowKurtosis(lf, sr));
+    if (res.firingHz) {
+      const fF = res.firingHz, fCyc = fF / cylinders;
+      // ruido agudo que se repite una vez por ciclo: viene de un solo cilindro (taqué, válvula, inyector, junta de inyector)
+      if (cylinders > 1 && nyq > 4000) {
+        const hb = envelope(bandpass(x, sr, 2000, Math.min(8000, nyq * 0.8)), sr);
+        const pk = envPeaks(hb.env, hb.es);
+        let sub = 0; for (let h = 1; h < cylinders; h++) sub += pk(fCyc * h);
+        res.hfImbalance = r2(sub / (cylinders - 1) / Math.max(pk(fF), 1e-12));
+      }
+      // golpe grave una vez por vuelta del cigüeñal (bielas, bancada, polea)
+      if (cylinders >= 3) {
+        const lb = envelope(lf, sr);
+        const pk = envPeaks(lb.env, lb.es);
+        res.rotKnock = r2(pk(fF * 2 / cylinders) / Math.max(pk(fF), 1e-12));
+      }
+      // oscilación del ralentí: rpm en ventanas de 2 s
+      const win = Math.round(2 * es), hopw = Math.round(es), P = es / fF, rpms = [];
+      for (let s0 = 0; s0 + win <= env.length; s0 += hopw) {
+        const seg = env.slice(s0, s0 + win), sm = mean(seg), sg = seg.map(v => v - sm);
+        let b0 = 0; for (const v of sg) b0 += v * v;
+        const acw = L => { let acc = 0; for (let i = 0; i + L < sg.length; i++) acc += sg[i] * sg[i + L]; return acc / Math.max(b0, 1e-20); };
+        let bv = -1, bl = 0;
+        for (let L = Math.floor(P * 0.8); L <= Math.ceil(P * 1.25); L++) { const a = acw(L); if (a > bv) { bv = a; bl = L; } }
+        if (bv > 0.2 && bl > 1) {
+          const a = acw(bl - 1), c = acw(bl + 1), den = a - 2 * bv + c;
+          const lag = bl + (den !== 0 ? 0.5 * (a - c) / den : 0);
+          rpms.push(es / lag * 120 / cylinders);
+        }
+      }
+      if (rpms.length >= 4) res.rpmHuntPct = r1(100 * std(rpms) / mean(rpms));
+    }
+
     // ¿se puede diagnosticar con esta grabación?
     res.reliable = !(res.levelDb < -55 || res.clipPct > 0.5 || res.bandwidthHz < 7000 || dur < 4);
     if (res.levelDb < -55) res.quality = res.quality.map(q => q.text.startsWith('Nivel muy bajo') ? Object.assign(q, { level: 'alerta' }) : q);
@@ -295,6 +390,12 @@
     }
     if (f.hfKurtosis != null && f.hfKurtosis >= LIM.kurtAlert) out.push({ level: 'alerta', area: 'Golpeteo', text: `Golpes metálicos muy marcados en agudos (impulsividad ${f.hfKurtosis}): taqués, empujadores, cadena de distribución o picado de biela.` });
     else if (f.hfKurtosis != null && f.hfKurtosis >= LIM.kurtWarn) out.push({ level: 'aviso', area: 'Golpeteo', text: `Golpeteo apreciable en agudos (impulsividad ${f.hfKurtosis}). En diésel o con inyectores ruidosos puede ser normal: lo importante es si crece entre grabaciones.` });
+    if (f.hfImbalance != null && f.hfImbalance >= 0.08 && (f.imbalance == null || f.imbalance < 0.2))
+      out.push({ level: f.hfImbalance >= 0.15 ? 'alerta' : 'aviso', area: 'Un cilindro', text: `Ruido agudo que se repite una vez por ciclo (índice ${f.hfImbalance}): sale de un solo cilindro. Típico de un taqué o una válvula, un inyector o su junta, o una fuga en el colector de escape.` });
+    const rodLike = f.rotKnock != null && f.rotKnock >= 0.3 && f.rotKnock >= 2 * (f.imbalance || 0) && f.lfKurtosis >= 12;
+    if (rodLike) out.push({ level: 'alerta', area: 'Golpe grave', text: `Golpe grave que se repite una vez por vuelta del cigüeñal (índice ${f.rotKnock}) con graves impulsivos: compatible con biela o bancada. Comprueba el nivel de aceite y evita forzar el motor hasta revisarlo.` });
+    else if (f.lfKurtosis != null && f.lfKurtosis >= 12 && (f.imbalance == null || f.imbalance < 0.2)) out.push({ level: 'aviso', area: 'Golpes graves', text: `Golpes en graves (impulsividad ${f.lfKurtosis}): volante bimasa, soportes, polea del cigüeñal o, en frío, cacheteo de pistón.` });
+    if (f.rpmHuntPct != null && f.rpmHuntPct >= 1.5) out.push({ level: f.rpmHuntPct >= 3 ? 'alerta' : 'aviso', area: 'Ralentí oscila', text: `El ralentí sube y baja ±${f.rpmHuntPct}%: toma de aire, mariposa o válvula de ralentí sucia, o sensor de temperatura.` });
     if (f.levelStdDb >= LIM.levelStdWarn) out.push({ level: 'aviso', area: 'Estabilidad', text: `El volumen oscila (±${f.levelStdDb} dB): régimen que sube y baja o ruidos ajenos durante la grabación.` });
     return out;
   }
@@ -333,6 +434,13 @@
       if (ratio >= 1.8) out.push({ level: 'alerta', area: 'Golpeteo', text: `Los golpes metálicos en agudos aumentan claramente (impulsividad ${fa.hfKurtosis} → ${fb.hfKurtosis}): taqués, distribución, inyectores o picado.` });
       else if (ratio >= 1.3) out.push({ level: 'aviso', area: 'Golpeteo', text: `Aumentan algo los golpes metálicos en agudos (impulsividad ${fa.hfKurtosis} → ${fb.hfKurtosis}).` });
     }
+    deltaMetric('Un cilindro', fa.hfImbalance, fb.hfImbalance, 0.06, 0.12, '', v => v, 'Aumenta el ruido agudo de un solo cilindro (taqué, válvula, inyector)');
+    deltaMetric('Golpe grave', fa.rotKnock, fb.rotKnock, 0.15, 0.3, '', v => v, 'Aumenta el golpe grave una vez por vuelta (biela, bancada, polea)');
+    deltaMetric('Ralentí oscila', fa.rpmHuntPct, fb.rpmHuntPct, 1.5, 3, '%', v => v, 'El ralentí oscila más');
+    if (fa.lfKurtosis > 0 && fb.lfKurtosis > 0 && fb.lfKurtosis / fa.lfKurtosis >= 1.4)
+      out.push({ level: fb.lfKurtosis / fa.lfKurtosis >= 2 ? 'alerta' : 'aviso', area: 'Golpes graves', text: `Aumentan los golpes en graves (impulsividad ${fa.lfKurtosis} → ${fb.lfKurtosis}).` });
+    if (fa.hissFlatness != null && fb.hissFlatness != null && fb.hissFlatness - fa.hissFlatness >= 0.04 && (fb.bands.b5 - fa.bands.b5 >= 3 || fb.bands.b6 - fa.bands.b6 >= 3))
+      out.push({ level: 'aviso', area: 'Siseo', text: 'Aparece más siseo de aire o gases en agudos: toma de aire, fuga de escape o manguito del turbo.' });
     if (fa.periodicity != null && fb.periodicity != null && fa.periodicity - fb.periodicity >= 0.2)
       out.push({ level: 'aviso', area: 'Ritmo', text: `El ritmo del motor es menos regular (${fa.periodicity} → ${fb.periodicity}).` });
 
@@ -470,6 +578,10 @@
     }
     // resumen
     const last = recs[recs.length - 1];
+    if (root.Faults) {
+      const prevSame = recs.slice(0, -1).reverse().find(r => r.testType === last.testType);
+      rep.causes = root.Faults.diagnose(last.features, prevSame ? prevSame.features : null, { fuel: vehicle && vehicle.fuel, testType: last.testType });
+    }
     const lastAbs = rep.absolute.filter(f => f.rec === last);
     const lastPair = rep.pairs.filter(p => !p.global).slice(-1)[0];
     const alerts = lastAbs.filter(f => f.level === 'alerta').length + (lastPair ? lastPair.findings.filter(f => f.level === 'alerta').length : 0);
@@ -515,6 +627,12 @@
       L.push('');
     });
     if (rep.trends.length) { L.push('TENDENCIAS'); rep.trends.forEach(t => L.push('• ' + t.text)); L.push(''); }
+    if (rep.causes) {
+      L.push('POSIBLES AVERÍAS (última ficha, orientativo)');
+      if (!rep.causes.length) L.push('• Ninguna avería del catálogo encaja con el sonido.');
+      rep.causes.forEach(c => L.push(`• ${root.Faults.likelihood(c.score)}: ${c.name} (${c.sys}; urgencia ${c.urg}). Indicios: ${c.ev.join('; ')}.`));
+      L.push('');
+    }
     L.push('RASGOS ANÓMALOS EN CADA GRABACIÓN');
     if (!rep.absolute.length) L.push('• Ninguno.');
     rep.absolute.forEach(f => L.push(`• ${tag(f.level)} ${f.rec.km.toLocaleString('es-ES')} km · ${f.area}: ${f.text}`));
