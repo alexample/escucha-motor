@@ -113,14 +113,14 @@
       t: 'Ruido agudo de un solo cilindro',
       b: `<p>Indica si los ruidos agudos (2–8 kHz: tics, chasquidos, soplidos) salen de <b>un único cilindro</b> en lugar de repartirse por igual.</p>
         <p><b>Cómo se calcula:</b> se aíslan los agudos, se mide cómo sube y baja su volumen y se busca si se repite una vez por ciclo completo del motor (cada dos vueltas) en vez de con cada explosión. Si un cilindro tiene un ruido propio, aparece ese patrón.</p>
-        <p><b>Valores orientativos:</b> por debajo de 0,08 es normal; de 0,08 a 0,15, vigilar; por encima de 0,15, hay un cilindro con ruido propio claro.</p>
+        <p><b>Valores orientativos:</b> ningún motor real tiene los cilindros exactamente iguales, así que valores de hasta 0,2 pueden ser normales. Por encima de 0,2 conviene vigilarlo y por encima de 0,35 hay un cilindro con ruido propio claro. Lo más fiable es <b>si sube entre fichas</b> de tu vehículo: un aumento de 0,06 o más ya se señala.</p>
         <p><b>Qué puede ser:</b> un taqué o una válvula con holgura, un inyector ruidoso, la junta de un inyector que sopla o una fuga en el colector de escape junto a ese cilindro. Si además ese cilindro pierde fuerza (desequilibrio alto), apunta más a un fallo de encendido.</p>`
     },
     rotKnock: {
       t: 'Golpe grave una vez por vuelta',
       b: `<p>Busca un golpe en graves y medios (100–1.000 Hz) que se repita <b>una vez por cada vuelta del cigüeñal</b>, que es el ritmo de un cojinete de biela o de bancada dañado.</p>
         <p><b>Cómo se calcula:</b> se aísla esa banda, se extrae cómo sube y baja su volumen y se compara la fuerza del ritmo «por vuelta» con la del ritmo de las explosiones.</p>
-        <p><b>Valores orientativos:</b> por debajo de 0,3 es normal. Por encima, y si además los graves son claramente impulsivos (golpes secos), es compatible con biela o bancada. Si a la vez hay desequilibrio de cilindros, es más probable un fallo de encendido.</p>
+        <p><b>Valores orientativos:</b> todos los motores tienen algo de vibración una vez por vuelta (desequilibrio de piezas giratorias), así que este valor por sí solo no indica avería. Solo es preocupante si además los graves son claramente impulsivos (golpes secos), o si sube entre fichas; en ese caso es compatible con biela o bancada. Si a la vez hay desequilibrio de cilindros, es más probable un fallo de encendido.</p>
         <p class="muted">Un golpe de biela es una avería grave: comprueba el aceite y no fuerces el motor hasta revisarlo. En motores de 1 o 2 cilindros no se calcula.</p>`
     },
     lfKurtosis: {

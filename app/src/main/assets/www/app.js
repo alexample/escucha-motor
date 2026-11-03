@@ -137,7 +137,7 @@
     return { pcm, sr };
   }
   async function reanalyzeOld(recs) {
-    const old = recs.filter(r => !r.features || (r.features.version || 1) < 4);
+    const old = recs.filter(r => !r.features || (r.features.version || 1) < 5);
     if (!old.length) return;
     toast(`Actualizando el análisis de ${old.length} ficha(s)…`, 4000);
     for (const r of old) {

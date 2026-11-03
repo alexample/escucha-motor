@@ -18,7 +18,10 @@
   const cold = c => c.testType === 'Arranque en frío';
   const revs = c => c.testType === 'Régimen sostenido 2.500 rpm';
   const diesel = c => c.fuel === 'Diésel';
-  const hfCyc = f => f.hfImbalance != null && f.hfImbalance >= 0.08 && (f.imbalance == null || f.imbalance < 0.2);
+  // ruido agudo de un cilindro: alto en sí mismo, o que ha crecido respecto a la ficha anterior
+  let PREV = null;
+  const hfCyc = f => f.hfImbalance != null && (f.imbalance == null || f.imbalance < 0.2) &&
+    (f.hfImbalance >= 0.2 || (PREV && PREV.hfImbalance != null && f.hfImbalance - PREV.hfImbalance >= 0.06 && f.hfImbalance >= 0.08));
   const rattle = f => f.hfRatio != null && f.hfRatio >= 1.6 && (f.hfImbalance == null || f.hfImbalance < 0.06);
   const misfirePattern = f => oneCyl(f) || (f.imbalance != null && f.imbalance >= 0.2);
   const rod = f => f.rotKnock != null && f.rotKnock >= 0.3 && f.rotKnock >= 2 * (f.imbalance || 0) && f.lfRatio >= 1.4 && !oneCyl(f);
@@ -234,7 +237,10 @@
       app: 'Componente una vez por vuelta sin golpes graves marcados.',
       confirm: 'Inspección visual de la goma de la polea y si oscila.',
       cause: 'Goma interior de la polea deteriorada.',
-      match(f) { return f.rotKnock >= 0.3 && f.lfRatio < 1.25 && f.rotKnock > 1.5 * (f.imbalance || 0) ? { score: 0.35, ev: [`componente una vez por vuelta (índice ${f.rotKnock})`] } : null; }
+      match(f, p) {
+        const d = delta(f, p, 'rotKnock');
+        return d != null && d >= 0.2 && f.rotKnock >= 0.3 && f.lfRatio < 1.25 && !misfirePattern(f) ? { score: 0.35, ev: [`componente una vez por vuelta ${p.rotKnock} → ${f.rotKnock}`] } : null;
+      }
     },
     // ---------- correas y accesorios ----------
     {
@@ -427,7 +433,8 @@
     const out = [];
     FAULTS.forEach(F => {
       let m = null;
-      try { m = F.match(f, p && p.reliable !== false ? p : null, ctx || {}); } catch (e) { m = null; }
+      PREV = p && p.reliable !== false ? p : null;
+      try { m = F.match(f, PREV, ctx || {}); } catch (e) { m = null; }
       if (m && m.score >= 0.3) out.push({ id: F.id, name: F.name, sys: SYS[F.sys], urg: F.urg, score: Math.min(1, m.score), ev: m.ev });
     });
     out.sort((a, b) => b.score - a.score);

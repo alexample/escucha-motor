@@ -121,7 +121,7 @@
     const x0 = input.subarray ? input.subarray(start, end) : input.slice(start, end);
     const N = x0.length;
     const dur = N / sr;
-    const res = { version: 4, sampleRate: sr, duration: r1(dur), cylinders: cylinders, quality: [] };
+    const res = { version: 5, sampleRate: sr, duration: r1(dur), cylinders: cylinders, quality: [] };
     if (dur < 4) { res.quality.push({ level: 'alerta', text: 'Grabación demasiado corta (mínimo 5 s).' }); }
 
     // DC y nivel
@@ -206,9 +206,14 @@
     }
 
     // ancho de banda útil: un corte brusco indica grabación procesada (modo llamada) o de baja calidad
+    // solo cuenta como corte si ocurre por encima de 2 kHz y TODO lo que hay encima queda muy por debajo
     let cliff = null;
-    for (let i = 0; i + 3 < res.spectrum.length; i++) {
-      if (res.spectrum[i][1] - res.spectrum[i + 3][1] >= 25 && res.spectrum[i][0] < 0.8 * nyq) { cliff = res.spectrum[i][0]; break; }
+    const sp = res.spectrum;
+    for (let i = 6; i + 3 < sp.length; i++) {
+      if (sp[i][0] < 2000 || sp[i][0] >= 0.8 * nyq) continue;
+      const before = mean(sp.slice(i - 6, i + 1).map(p => p[1]));
+      const after = Math.max(...sp.slice(i + 3).map(p => p[1]));
+      if (before - after >= 25) { cliff = sp[i][0]; break; }
     }
     res.bandwidthHz = Math.round(cliff || Math.min(16000, nyq));
     if (res.bandwidthHz < 7000) res.quality.push({ level: 'alerta', text: `Sonido recortado por encima de ${res.bandwidthHz} Hz: el móvil ha grabado en modo llamada o con filtros. Los agudos (golpeteos, silbidos) no se pueden analizar.` });
@@ -397,8 +402,8 @@
     }
     if (f.hfRatio != null && f.hfRatio >= LIM.kurtAlert / 15.6) out.push({ level: 'alerta', area: 'Golpeteo', text: `Golpes metálicos muy marcados en agudos (impulsividad ${f.hfKurtosis}): taqués, empujadores, cadena de distribución o picado de biela.` });
     else if (f.hfRatio != null && f.hfRatio >= LIM.kurtWarn / 15.6) out.push({ level: 'aviso', area: 'Golpeteo', text: `Golpeteo apreciable en agudos (impulsividad ${f.hfKurtosis}). En diésel o con inyectores ruidosos puede ser normal: lo importante es si crece entre grabaciones.` });
-    if (f.hfImbalance != null && f.hfImbalance >= 0.08 && (f.imbalance == null || f.imbalance < 0.2))
-      out.push({ level: f.hfImbalance >= 0.15 ? 'alerta' : 'aviso', area: 'Un cilindro', text: `Ruido agudo que se repite una vez por ciclo (índice ${f.hfImbalance}): sale de un solo cilindro. Típico de un taqué o una válvula, un inyector o su junta, o una fuga en el colector de escape.` });
+    if (f.hfImbalance != null && f.hfImbalance >= 0.2 && (f.imbalance == null || f.imbalance < 0.2))
+      out.push({ level: f.hfImbalance >= 0.35 ? 'alerta' : 'aviso', area: 'Un cilindro', text: `Ruido agudo que se repite una vez por ciclo (índice ${f.hfImbalance}): sale de un solo cilindro. Típico de un taqué o una válvula, un inyector o su junta, o una fuga en el colector de escape.` });
     const rodLike = f.rotKnock != null && f.rotKnock >= 0.3 && f.rotKnock >= 2 * (f.imbalance || 0) && f.lfRatio >= 1.4;
     if (rodLike) out.push({ level: 'alerta', area: 'Golpe grave', text: `Golpe grave que se repite una vez por vuelta del cigüeñal (índice ${f.rotKnock}) con graves impulsivos: compatible con biela o bancada. Comprueba el nivel de aceite y evita forzar el motor hasta revisarlo.` });
     else if (f.lfRatio != null && f.lfRatio >= 1.4 && (f.imbalance == null || f.imbalance < 0.2)) out.push({ level: 'aviso', area: 'Golpes graves', text: `Golpes en graves (impulsividad ${f.lfKurtosis}, normal ≈ ${f.lfRef} con ${f.cylinders} cilindros): volante bimasa, soportes, polea del cigüeñal o, en frío, cacheteo de pistón.` });
