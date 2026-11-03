@@ -121,7 +121,7 @@
     const x0 = input.subarray ? input.subarray(start, end) : input.slice(start, end);
     const N = x0.length;
     const dur = N / sr;
-    const res = { version: 3, sampleRate: sr, duration: r1(dur), cylinders: cylinders, quality: [] };
+    const res = { version: 4, sampleRate: sr, duration: r1(dur), cylinders: cylinders, quality: [] };
     if (dur < 4) { res.quality.push({ level: 'alerta', text: 'Grabación demasiado corta (mínimo 5 s).' }); }
 
     // DC y nivel
@@ -309,11 +309,18 @@
     }
     res.hfKurtosis = ks.length ? r1(median(ks)) : null;
     res.hfCrest = cs.length ? r1(median(cs)) : null;
+    const HF_REF = { 1: 36, 2: 22, 3: 22, 4: 15.6, 5: 12.5, 6: 12, 8: 9.8 };
+    res.hfRef = HF_REF[cylinders] || (cylinders > 8 ? 9 : 15.6);
+    res.hfRatio = res.hfKurtosis != null ? r2(res.hfKurtosis / res.hfRef) : null;
 
     // ---- detectores específicos de averías ----
     res.hfImbalance = null; res.rotKnock = null; res.lfKurtosis = null; res.rpmHuntPct = null;
     const lf = bandpass(x, sr, 100, 1000);
     res.lfKurtosis = r1(windowKurtosis(lf, sr));
+    // con pocos cilindros los graves son golpes por naturaleza: valor de referencia de un motor sano
+    const LF_REF = { 1: 21, 2: 12.5, 3: 12.5, 4: 8.8, 5: 7, 6: 6.6, 8: 5.4 };
+    res.lfRef = LF_REF[cylinders] || (cylinders > 8 ? 5 : 8.8);
+    res.lfRatio = res.lfKurtosis != null ? r2(res.lfKurtosis / res.lfRef) : null;
     if (res.firingHz) {
       const fF = res.firingHz, fCyc = fF / cylinders;
       // ruido agudo que se repite una vez por ciclo: viene de un solo cilindro (taqué, válvula, inyector, junta de inyector)
@@ -388,13 +395,13 @@
       if (f.weakEventsPerMin >= LIM.weakAlert) out.push({ level: 'alerta', area: 'Fallos', text: `${f.weakEventsPerMin} explosiones débiles por minuto (${f.weakPct}%): compatible con fallos de encendido o de inyección.${extra}` });
       else if (f.weakEventsPerMin >= LIM.weakWarn) out.push({ level: 'aviso', area: 'Fallos', text: `${f.weakEventsPerMin} explosiones débiles por minuto (${f.weakPct}%).` });
     }
-    if (f.hfKurtosis != null && f.hfKurtosis >= LIM.kurtAlert) out.push({ level: 'alerta', area: 'Golpeteo', text: `Golpes metálicos muy marcados en agudos (impulsividad ${f.hfKurtosis}): taqués, empujadores, cadena de distribución o picado de biela.` });
-    else if (f.hfKurtosis != null && f.hfKurtosis >= LIM.kurtWarn) out.push({ level: 'aviso', area: 'Golpeteo', text: `Golpeteo apreciable en agudos (impulsividad ${f.hfKurtosis}). En diésel o con inyectores ruidosos puede ser normal: lo importante es si crece entre grabaciones.` });
+    if (f.hfRatio != null && f.hfRatio >= LIM.kurtAlert / 15.6) out.push({ level: 'alerta', area: 'Golpeteo', text: `Golpes metálicos muy marcados en agudos (impulsividad ${f.hfKurtosis}): taqués, empujadores, cadena de distribución o picado de biela.` });
+    else if (f.hfRatio != null && f.hfRatio >= LIM.kurtWarn / 15.6) out.push({ level: 'aviso', area: 'Golpeteo', text: `Golpeteo apreciable en agudos (impulsividad ${f.hfKurtosis}). En diésel o con inyectores ruidosos puede ser normal: lo importante es si crece entre grabaciones.` });
     if (f.hfImbalance != null && f.hfImbalance >= 0.08 && (f.imbalance == null || f.imbalance < 0.2))
       out.push({ level: f.hfImbalance >= 0.15 ? 'alerta' : 'aviso', area: 'Un cilindro', text: `Ruido agudo que se repite una vez por ciclo (índice ${f.hfImbalance}): sale de un solo cilindro. Típico de un taqué o una válvula, un inyector o su junta, o una fuga en el colector de escape.` });
-    const rodLike = f.rotKnock != null && f.rotKnock >= 0.3 && f.rotKnock >= 2 * (f.imbalance || 0) && f.lfKurtosis >= 12;
+    const rodLike = f.rotKnock != null && f.rotKnock >= 0.3 && f.rotKnock >= 2 * (f.imbalance || 0) && f.lfRatio >= 1.4;
     if (rodLike) out.push({ level: 'alerta', area: 'Golpe grave', text: `Golpe grave que se repite una vez por vuelta del cigüeñal (índice ${f.rotKnock}) con graves impulsivos: compatible con biela o bancada. Comprueba el nivel de aceite y evita forzar el motor hasta revisarlo.` });
-    else if (f.lfKurtosis != null && f.lfKurtosis >= 12 && (f.imbalance == null || f.imbalance < 0.2)) out.push({ level: 'aviso', area: 'Golpes graves', text: `Golpes en graves (impulsividad ${f.lfKurtosis}): volante bimasa, soportes, polea del cigüeñal o, en frío, cacheteo de pistón.` });
+    else if (f.lfRatio != null && f.lfRatio >= 1.4 && (f.imbalance == null || f.imbalance < 0.2)) out.push({ level: 'aviso', area: 'Golpes graves', text: `Golpes en graves (impulsividad ${f.lfKurtosis}, normal ≈ ${f.lfRef} con ${f.cylinders} cilindros): volante bimasa, soportes, polea del cigüeñal o, en frío, cacheteo de pistón.` });
     if (f.rpmHuntPct != null && f.rpmHuntPct >= 1.5) out.push({ level: f.rpmHuntPct >= 3 ? 'alerta' : 'aviso', area: 'Ralentí oscila', text: `El ralentí sube y baja ±${f.rpmHuntPct}%: toma de aire, mariposa o válvula de ralentí sucia, o sensor de temperatura.` });
     if (f.levelStdDb >= LIM.levelStdWarn) out.push({ level: 'aviso', area: 'Estabilidad', text: `El volumen oscila (±${f.levelStdDb} dB): régimen que sube y baja o ruidos ajenos durante la grabación.` });
     return out;

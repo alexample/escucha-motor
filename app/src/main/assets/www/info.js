@@ -49,7 +49,7 @@
       t: 'Impulsividad en agudos (golpeteo)',
       b: `<p>Mide si en los agudos (por encima de 2 kHz) hay golpes secos y metálicos o un sonido continuo.</p>
         <p><b>Cómo se calcula:</b> se filtran los agudos y se calcula la <i>curtosis</i>, un indicador estadístico que vale 3 para un ruido uniforme y sube mucho cuando hay picos cortos y fuertes (clics, golpes). Se calcula por segundos y se toma el valor mediano, así que un golpe aislado (por ejemplo, al empujar la tabla) no lo altera.</p>
-        <p><b>Valores orientativos:</b> en motores sanos suele estar entre 5 y 25; los diésel e inyectores directos dan valores más altos de forma normal. Lo importante es <b>si crece entre fichas</b> del mismo vehículo: un aumento del 30% merece atención y uno del 80% es claro.</p>
+        <p><b>Valores orientativos:</b> depende del número de cilindros (con pocos cilindros cada explosión ya es un golpe): un 4 cilindros sano ronda 10–20, un 2 o 3 cilindros unos 22 y un monocilíndrico unos 36. Los diésel e inyectores directos dan valores más altos de forma normal. Lo importante es <b>si crece entre fichas</b> del mismo vehículo: un aumento del 30% merece atención y uno del 80% es claro.</p>
         <p><b>Causas habituales:</b> taqués o empujadores hidráulicos sin aceite, holgura de válvulas, cadena de distribución destensada, inyectores ruidosos o, en casos graves, picado de biela.</p>`
     },
     levelDb: {
@@ -120,13 +120,13 @@
       t: 'Golpe grave una vez por vuelta',
       b: `<p>Busca un golpe en graves y medios (100–1.000 Hz) que se repita <b>una vez por cada vuelta del cigüeñal</b>, que es el ritmo de un cojinete de biela o de bancada dañado.</p>
         <p><b>Cómo se calcula:</b> se aísla esa banda, se extrae cómo sube y baja su volumen y se compara la fuerza del ritmo «por vuelta» con la del ritmo de las explosiones.</p>
-        <p><b>Valores orientativos:</b> por debajo de 0,3 es normal. Por encima, y si además los graves son impulsivos (golpes secos), es compatible con biela o bancada. Si a la vez hay desequilibrio de cilindros, es más probable un fallo de encendido.</p>
+        <p><b>Valores orientativos:</b> por debajo de 0,3 es normal. Por encima, y si además los graves son claramente impulsivos (golpes secos), es compatible con biela o bancada. Si a la vez hay desequilibrio de cilindros, es más probable un fallo de encendido.</p>
         <p class="muted">Un golpe de biela es una avería grave: comprueba el aceite y no fuerces el motor hasta revisarlo. En motores de 1 o 2 cilindros no se calcula.</p>`
     },
     lfKurtosis: {
       t: 'Impulsividad en graves',
       b: `<p>Igual que la impulsividad en agudos, pero en la banda de 100 a 1.000 Hz: mide si hay golpes secos y sordos en lugar de un sonido continuo.</p>
-        <p><b>Valores orientativos:</b> en motores sanos suele estar por debajo de 11. Por encima de 12 hay golpes graves claros.</p>
+        <p><b>Valores orientativos:</b> dependen del número de cilindros, porque con pocos cilindros cada explosión ya es un golpe: un motor sano ronda 8–9 con 4 cilindros, 12 con 2–3, 7 con 5–6 y 21 con 1. Se considera alto a partir de 1,4 veces ese valor de referencia.</p>
         <p><b>Qué puede ser:</b> biela o bancada (si además se repite una vez por vuelta), volante bimasa (cambia al pisar el embrague), soportes del motor, polea del cigüeñal o, solo en frío, cacheteo de pistón.</p>`
     },
     rpmHuntPct: {

@@ -19,9 +19,9 @@
   const revs = c => c.testType === 'Régimen sostenido 2.500 rpm';
   const diesel = c => c.fuel === 'Diésel';
   const hfCyc = f => f.hfImbalance != null && f.hfImbalance >= 0.08 && (f.imbalance == null || f.imbalance < 0.2);
-  const rattle = f => f.hfKurtosis != null && f.hfKurtosis >= 25 && (f.hfImbalance == null || f.hfImbalance < 0.06);
+  const rattle = f => f.hfRatio != null && f.hfRatio >= 1.6 && (f.hfImbalance == null || f.hfImbalance < 0.06);
   const misfirePattern = f => oneCyl(f) || (f.imbalance != null && f.imbalance >= 0.2);
-  const rod = f => f.rotKnock != null && f.rotKnock >= 0.3 && f.rotKnock >= 2 * (f.imbalance || 0) && f.lfKurtosis >= 12 && !oneCyl(f);
+  const rod = f => f.rotKnock != null && f.rotKnock >= 0.3 && f.rotKnock >= 2 * (f.imbalance || 0) && f.lfRatio >= 1.4 && !oneCyl(f);
 
   const FAULTS = [
     // ---------- combustión y encendido ----------
@@ -157,7 +157,7 @@
         if (!hfCyc(f)) return null;
         const ev = [`ruido agudo de un solo cilindro (índice ${f.hfImbalance})`];
         let s = 0.45;
-        if (f.hfKurtosis >= 18) { s += 0.15; ev.push(`golpes metálicos en agudos (${f.hfKurtosis})`); }
+        if (f.hfRatio >= 1.15) { s += 0.15; ev.push(`golpes metálicos en agudos (${f.hfKurtosis})`); }
         if (cold(c)) s += 0.05;
         return { score: s, ev };
       }
@@ -205,7 +205,7 @@
       cause: 'Falta de aceite, desgaste, uso prolongado a alta temperatura.',
       match(f) {
         if (rod(f)) return { score: 0.75, ev: [`golpe una vez por vuelta (índice ${f.rotKnock})`, `impulsividad en graves ${f.lfKurtosis}`] };
-        if (f.rotKnock >= 0.3 && f.lfKurtosis >= 11 && f.rotKnock >= 1.5 * (f.imbalance || 0) && !oneCyl(f)) return { score: 0.4, ev: [`golpe una vez por vuelta (índice ${f.rotKnock})`] };
+        if (f.rotKnock >= 0.3 && f.lfRatio >= 1.25 && f.rotKnock >= 1.5 * (f.imbalance || 0) && !oneCyl(f)) return { score: 0.4, ev: [`golpe una vez por vuelta (índice ${f.rotKnock})`] };
         return null;
       }
     },
@@ -216,7 +216,7 @@
       app: 'Golpe grave una vez por vuelta y graves más impulsivos; no se distingue con seguridad de una biela.',
       confirm: 'Presión de aceite en caliente, inspección en taller.',
       cause: 'Desgaste, falta de lubricación.',
-      match(f) { return f.rotKnock >= 0.3 && f.lfKurtosis >= 11 && !misfirePattern(f) ? { score: 0.35, ev: [`golpe una vez por vuelta (índice ${f.rotKnock})`, `impulsividad en graves ${f.lfKurtosis}`] } : null; }
+      match(f) { return f.rotKnock >= 0.3 && f.lfRatio >= 1.25 && !misfirePattern(f) ? { score: 0.35, ev: [`golpe una vez por vuelta (índice ${f.rotKnock})`, `impulsividad en graves ${f.lfKurtosis}`] } : null; }
     },
     {
       id: 'piston_slap', sys: 'baja', name: 'Cacheteo de pistón', urg: 'baja', det: 'parcial',
@@ -225,7 +225,7 @@
       app: 'Golpes en graves en la prueba de arranque en frío que no aparecen en caliente.',
       confirm: 'Comparar fichas en frío y en caliente; inspección de holgura pistón-cilindro.',
       cause: 'Holgura excesiva por desgaste.',
-      match(f, p, c) { return cold(c) && f.lfKurtosis >= 12 ? { score: 0.4, ev: [`impulsividad en graves ${f.lfKurtosis} en frío`] } : null; }
+      match(f, p, c) { return cold(c) && f.lfRatio >= 1.4 ? { score: 0.4, ev: [`impulsividad en graves ${f.lfKurtosis} en frío`] } : null; }
     },
     {
       id: 'damper', sys: 'baja', name: 'Polea amortiguadora del cigüeñal', urg: 'media', det: 'parcial',
@@ -234,7 +234,7 @@
       app: 'Componente una vez por vuelta sin golpes graves marcados.',
       confirm: 'Inspección visual de la goma de la polea y si oscila.',
       cause: 'Goma interior de la polea deteriorada.',
-      match(f) { return f.rotKnock >= 0.3 && f.lfKurtosis < 11 && f.rotKnock > 1.5 * (f.imbalance || 0) ? { score: 0.35, ev: [`componente una vez por vuelta (índice ${f.rotKnock})`] } : null; }
+      match(f) { return f.rotKnock >= 0.3 && f.lfRatio < 1.25 && f.rotKnock > 1.5 * (f.imbalance || 0) ? { score: 0.35, ev: [`componente una vez por vuelta (índice ${f.rotKnock})`] } : null; }
     },
     // ---------- correas y accesorios ----------
     {
@@ -404,7 +404,7 @@
       confirm: 'Pisar y soltar el embrague al ralentí: si el ruido cambia, es transmisión. Medir el juego angular del volante.',
       cause: 'Muelles internos gastados.',
       match(f, p, c) {
-        if (f.lfKurtosis >= 12 && !(f.rotKnock >= 0.3) && !misfirePattern(f)) return { score: diesel(c) ? 0.45 : 0.35, ev: [`impulsividad en graves ${f.lfKurtosis}`] };
+        if (f.lfRatio >= 1.4 && !(f.rotKnock >= 0.3) && !misfirePattern(f)) return { score: diesel(c) ? 0.45 : 0.35, ev: [`impulsividad en graves ${f.lfKurtosis}`] };
         return null;
       }
     },
