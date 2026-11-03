@@ -87,6 +87,7 @@
   }
   window.__back = function () {
     if (!$('#modal').classList.contains('hidden')) { closeModal(); return true; }
+    if (!$('#ia').classList.contains('hidden')) { $('#ia').classList.add('hidden'); return true; }
     if (S.view === 'detalle' || S.view === 'informe') { go('fichas'); return true; }
     if (S.view !== 'grabar') { go('grabar'); return true; }
     return false;
@@ -525,6 +526,7 @@
       ${causesHtml(Faults.diagnose(f, prev ? prev.features : null, { fuel: S.vehicle && S.vehicle.fuel, testType: r.testType }), f)}
       ${isolateCard(r)}
       <div class="card"><h2>Espectro ${Info.btn('spectrum')}</h2><canvas class="chart" id="detChart"></canvas></div>
+      <button class="btn ia-btn" id="detIA">✦ Pregúntale a la IA sobre esta ficha</button>
       ${prev ? `<button class="btn primary" id="detCmp">Comparar con la anterior (${fmtKm(prev.km)})</button>` : ''}
       <button class="btn ghost" id="detWav">Exportar audio (WAV)</button>
       <button class="btn ghost" id="detEdit">Editar datos</button>
@@ -534,6 +536,7 @@
     drawSpectra($('#detChart'), [{ label: fmtKm(r.km), spec: f.spectrum }]);
     if (prev) $('#detCmp').onclick = () => showReport([prev.id, r.id]);
     bindIsolate(r);
+    $('#detIA').onclick = () => openIA({ titulo: `Ficha de ${fmtKm(r.km)} · ${r.testType}`, contexto: () => fichaContext(r, prev), sug: iaSugFicha(r) });
     $('#detWav').onclick = () => {
       const name = `motor-${(S.vehicle ? S.vehicle.name : 'vehiculo').replace(/[^\w-]+/g, '_')}-${r.km}km-${new Date(r.date).toISOString().slice(0, 10)}.wav`;
       if (Bridge && Bridge.saveBase64) { Bridge.saveBase64(name, 'audio/wav', abToB64(r.audio)); return; }
@@ -648,6 +651,106 @@
       const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([lastWav], { type: 'audio/wav' })); a.download = name; a.click();
     };
   }
+
+  // ---------- asistente con IA ----------
+  const IA = { hist: [], ocupado: false, ctx: null };
+  function vehContext() {
+    const v = S.vehicle || {};
+    const lista = S.recs.slice().sort((a, b) => a.km - b.km).map(x => `- ${fmtDate(x.date)} · ${fmtKm(x.km)} · ${x.testType} · motivo: ${x.reason}${x.features.reliable === false ? ' · NO FIABLE' : ''} · estado: ${STATUS_TXT[statusOf(x.features)]}${x.features.rpm ? ' · ' + x.features.rpm + ' rpm' : ''}`).join('\n');
+    return `VEHÍCULO: ${v.name || '—'} (${v.type === 'moto' ? 'moto' : 'coche'}), ${v.cylinders} cilindros, ${v.fuel}, 4 tiempos.\nFICHAS GUARDADAS:\n${lista || '(ninguna)'}`;
+  }
+  function featLine(f) {
+    const g = (k, l, fn) => f[k] != null ? `${l} ${fn ? fn(f[k]) : f[k]}` : null;
+    return [g('rpm', 'rpm'), g('periodicity', 'regularidad', v => Math.round(v * 100) + '%'), g('imbalance', 'desequilibrio cilindros (normal <0,2)'),
+      g('cycleCv', 'irregularidad entre explosiones', v => Math.round(v * 100) + '% (normal <28%)'), g('weakPct', 'explosiones débiles', v => v + '%'),
+      g('hfKurtosis', 'impulsividad agudos'), g('hfImbalance', 'ruido agudo de un solo cilindro (vigilar >0,2)'), g('rotKnock', 'componente por vuelta'),
+      g('lfKurtosis', 'impulsividad graves'), g('rpmHuntPct', 'oscilación ralentí', v => '±' + v + '%'), g('centroidHz', 'centro tonal', v => v + ' Hz'),
+      g('levelDb', 'nivel', v => v + ' dBFS'), g('bandwidthHz', 'ancho de banda', v => v + ' Hz'),
+      f.tones && f.tones.length ? 'tonos: ' + f.tones.map(t => t.hz + ' Hz (+' + t.prom + ' dB)').join(', ') : 'sin tonos destacados',
+      f.bands ? 'bandas (dB relativos): ' + EM.BANDS.map(b => `${b.lo}-${b.hi} Hz ${f.bands[b.id]}`).join(', ') : null].filter(Boolean).join('; ');
+  }
+  function fichaContext(r, prev) {
+    const f = r.features, L = [vehContext(), ''];
+    L.push(`FICHA ACTUAL: ${new Date(r.date).toLocaleString('es-ES')} · ${fmtKm(r.km)} · prueba: ${r.testType}`);
+    L.push(`Motivo de la grabación: ${r.reason}`);
+    if (r.notes) L.push(`Observaciones del usuario: ${r.notes}`);
+    if (r.ambientC != null) L.push(`Temperatura ambiente: ${r.ambientC} °C`);
+    if (r.warmMin != null) L.push(`Minutos de motor en marcha: ${r.warmMin}`);
+    if (f.takes && f.takes.n > 1) L.push(`Muestras: ${f.takes.used.length} de ${f.takes.n} válidas`);
+    L.push(`Grabación fiable: ${f.reliable === false ? 'NO' : 'sí'} · micrófono: ${r.source || '—'}`);
+    L.push('INDICADORES: ' + featLine(f));
+    if (f.spread) L.push('Variación entre muestras: ' + Object.entries(f.spread).map(([k, v]) => k + ' ±' + v).join(', '));
+    const av = EM.absoluteFindings(f).concat(f.quality || []);
+    L.push('AVISOS DE LA APP: ' + (av.length ? av.map(a => `[${a.level}] ${a.area || 'Calidad'}: ${a.text}`).join(' | ') : 'ninguno'));
+    const cs = Faults.diagnose(f, prev ? prev.features : null, { fuel: S.vehicle.fuel, testType: r.testType });
+    L.push('POSIBLES AVERÍAS SEGÚN LA APP: ' + (cs.length ? cs.map(c => `${Faults.likelihood(c.score)}: ${c.name} (indicios: ${c.ev.join('; ')})`).join(' | ') : 'ninguna'));
+    cs.slice(0, 3).forEach(c => { const F = Faults.FAULTS.find(x => x.id === c.id); if (F) L.push(`  · ${F.name}: suena ${F.sound} Confirmar: ${F.confirm}`); });
+    if (prev) {
+      L.push('', `COMPARACIÓN CON LA FICHA ANTERIOR (${fmtKm(prev.km)}, ${fmtDate(prev.date)}, motivo: ${prev.reason}):`);
+      L.push('Indicadores anteriores: ' + featLine(prev.features));
+      const cmp = EM.compareTwo(prev, r);
+      L.push('Cambios: ' + (cmp.length ? cmp.map(a => `[${a.level}] ${a.area}: ${a.text}`).join(' | ') : 'sin diferencias relevantes'));
+      const fd = EM.freqDiff(prev.features, f);
+      if (fd.zones.length) L.push('Zonas de frecuencia que más cambian: ' + fd.zones.map(z => z.text).join('; '));
+      if (fd.tones.length) L.push('Tonos: ' + fd.tones.map(t => t.text).join('; '));
+    } else L.push('', 'No hay ficha anterior del mismo tipo de prueba para comparar.');
+    return L.join('\n');
+  }
+  function iaSugFicha(r) {
+    const f = r.features, s2 = ['Explícame este resultado de forma sencilla', '¿Es grave? ¿Puedo seguir usando el vehículo?'];
+    const cs = Faults.diagnose(f, null, { fuel: S.vehicle.fuel, testType: r.testType });
+    if (cs.length) s2.push(`¿Cómo compruebo si es «${cs[0].name.toLowerCase()}»?`);
+    else s2.push('¿Qué debería vigilar en las próximas fichas?');
+    s2.push(f.reliable === false ? '¿Por qué la grabación no es fiable?' : '¿Qué ha cambiado desde la ficha anterior?');
+    return s2;
+  }
+  function iaFormato(t) {
+    const lines = esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').split(/\n+/);
+    let html = '', inList = false;
+    lines.forEach(l => {
+      const m = l.match(/^\s*(?:[-•*]|\d+[.)])\s+(.*)/);
+      if (m) { if (!inList) { html += '<ul>'; inList = true; } html += `<li>${m[1]}</li>`; }
+      else { if (inList) { html += '</ul>'; inList = false; } if (l.trim()) html += `<p>${l}</p>`; }
+    });
+    return html + (inList ? '</ul>' : '');
+  }
+  function iaAdd(cls, html) { const d = document.createElement('div'); d.className = 'ia-m ' + cls; d.innerHTML = html; $('#iaMsgs').appendChild(d); $('#iaMsgs').scrollTop = 1e9; return d; }
+  function iaSug(list) {
+    const d = document.createElement('div'); d.className = 'ia-sug';
+    d.innerHTML = list.map(q => `<button type="button" data-q="${esc(q)}">${esc(q)}</button>`).join('');
+    $('#iaMsgs').appendChild(d); $('#iaMsgs').scrollTop = 1e9;
+  }
+  function openIA(o) {
+    IA.ctx = o; IA.hist = [];
+    $('#iaSub').textContent = o.titulo;
+    $('#iaMsgs').innerHTML = '';
+    iaAdd('el', '<p>Hola. Conozco los datos de esta ficha y del resto de grabaciones de tu vehículo. Pregúntame lo que quieras sobre el sonido del motor.</p><p class="muted small">Es orientativo: no sustituye a un mecánico.</p>');
+    iaSug(o.sug || []);
+    $('#ia').classList.remove('hidden');
+  }
+  async function iaAsk(q) {
+    q = String(q || '').trim(); if (!q || IA.ocupado) return;
+    $$('#iaMsgs .ia-sug').forEach(x => x.remove());
+    iaAdd('yo', esc(q));
+    const pen = iaAdd('el', '<span class="ia-pen"><i></i><i></i><i></i></span>');
+    IA.ocupado = true;
+    try {
+      const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 45000);
+      const r = await fetch(window.IA_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: ctl.signal,
+        body: JSON.stringify({ pregunta: q, historial: IA.hist.slice(-6), contexto: IA.ctx.contexto() }) });
+      clearTimeout(t);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.respuesta) throw new Error(d.error || 'No he podido responder ahora mismo.');
+      pen.innerHTML = iaFormato(d.respuesta);
+      IA.hist.push({ rol: 'usuario', texto: q }, { rol: 'asistente', texto: d.respuesta });
+    } catch (e) {
+      pen.classList.add('err');
+      pen.textContent = e && e.name === 'AbortError' ? 'La IA está tardando demasiado. Inténtalo otra vez.' : (navigator.onLine === false ? 'Sin conexión: el asistente necesita internet.' : (e.message || 'No he podido responder ahora mismo.'));
+    } finally { IA.ocupado = false; $('#iaMsgs').scrollTop = 1e9; }
+  }
+  $('#iaForm').onsubmit = e => { e.preventDefault(); const q = $('#iaQ').value; $('#iaQ').value = ''; iaAsk(q); };
+  $('#iaMsgs').addEventListener('click', e => { const b = e.target.closest('[data-q]'); if (b) iaAsk(b.dataset.q); });
+  $('#iaClose').onclick = () => $('#ia').classList.add('hidden');
 
   // ---------- gráficas ----------
   const COLORS = ['#5b9bd5', '#f5a524', '#e5484d', '#46a758', '#b07fe0', '#e86fb0', '#4fd1c5', '#c9c9c9'];
@@ -770,12 +873,15 @@
       <div class="card" id="aiCard"><h2>Interpretación de Claude</h2><div id="aiOut" class="ai muted small">${LS.get('apiKey', '') ? 'Pide una interpretación redactada a partir de estos datos.' : 'Añade tu clave API en Ajustes para obtener una interpretación redactada por Claude.'}</div>
         ${LS.get('apiKey', '') ? '<button class="btn ghost" id="btnAI">Generar interpretación</button>' : '<button class="btn ghost" data-go="ajustes">Ir a Ajustes</button>'}</div>
       <p class="muted small">Informe orientativo basado solo en el sonido; no sustituye el diagnóstico de un mecánico.</p>
+      <button class="btn ia-btn" id="repIA">✦ Pregúntale a la IA sobre esta comparativa</button>
       <div class="actions"><button class="btn ghost" id="btnCopy">Copiar</button><button class="btn primary" id="btnShare">Compartir informe</button></div>`;
     go('informe');
     drawSpectra($('#repChart'), sorted.map(r => ({ label: fmtKm(r.km), spec: r.features.spectrum })));
     rep.pairs.forEach((p, pi) => { const c = document.getElementById('fd' + pi); if (c && p.freq) drawDiff(c, p.freq.diff); });
     const text = () => EM.reportToText(rep, fmtDate) + (S.aiText ? '\n\nINTERPRETACIÓN (Claude)\n' + S.aiText : '');
     S.aiText = '';
+    $('#repIA').onclick = () => openIA({ titulo: `Comparativa de ${sorted.length} fichas`, contexto: () => vehContext() + '\n\nINFORME DE LA COMPARATIVA:\n' + EM.reportToText(rep, fmtDate) + '\n\nINDICADORES POR FICHA:\n' + sorted.map(x => fmtKm(x.km) + ': ' + featLine(x.features)).join('\n'),
+      sug: ['¿Qué ha cambiado entre estas fichas?', '¿Alguna diferencia es preocupante?', '¿Qué debería revisar primero?', '¿Puede deberse a cómo grabé?'] });
     $('#btnShare').onclick = () => shareText('Informe motor ' + (S.vehicle ? S.vehicle.name : ''), text());
     $('#btnCopy').onclick = () => copyText(text());
     const bai = $('#btnAI'); if (bai) bai.onclick = () => askClaude(rep);

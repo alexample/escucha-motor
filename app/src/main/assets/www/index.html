@@ -216,8 +216,14 @@
 </nav>
 
 <div id="modal" class="modal hidden"><div class="sheet" id="modalBody"></div></div>
+<div id="ia" class="ia hidden" role="dialog" aria-label="Pregúntale a la IA">
+  <div class="ia-cab"><div><b>Pregúntale a la IA</b><small id="iaSub"></small></div><button class="icon" id="iaClose" aria-label="Cerrar">✕</button></div>
+  <div class="ia-msgs" id="iaMsgs"></div>
+  <form class="ia-form" id="iaForm"><input id="iaQ" autocomplete="off" placeholder="Escribe tu pregunta…" maxlength="600"><button class="btn primary" aria-label="Enviar">➤</button></form>
+</div>
 <div id="toast" class="toast hidden"></div>
 
+<script>window.IA_URL = "https://dondeloechan-ia.alexample.workers.dev/escuchamotor-ia";</script>
 <script src="analysis.js"></script>
 <script src="placement.js"></script>
 <script src="info.js"></script>

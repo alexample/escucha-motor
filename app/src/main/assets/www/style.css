@@ -119,3 +119,24 @@ details.fault summary span:first-child::before { content: '▸ '; color: var(--a
 details.fault[open] summary span:first-child::before { content: '▾ '; }
 details.fault .pill { flex: none; }
 details.fault p { font-size: 14px; margin: 6px 0; }
+
+.ia { position: fixed; inset: 0; z-index: 25; background: var(--bg); display: flex; flex-direction: column; padding-top: env(safe-area-inset-top); }
+.ia-cab { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.ia-cab b { display: block; font-size: 17px; }
+.ia-cab small { display: block; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.ia-msgs { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.ia-m { max-width: 88%; padding: 10px 13px; border-radius: 14px; font-size: 15px; line-height: 1.45; word-wrap: break-word; }
+.ia-m.yo { align-self: flex-end; background: var(--accent); color: #1a1200; border-bottom-right-radius: 4px; }
+.ia-m.el { align-self: flex-start; background: var(--card); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+.ia-m.el p { margin: 0 0 6px; } .ia-m.el p:last-child { margin: 0; }
+.ia-m.el ul { margin: 4px 0; padding-left: 18px; }
+.ia-m.err { background: rgba(229,72,77,.15); border-color: var(--alert); }
+.ia-pen { display: inline-flex; gap: 4px; } .ia-pen i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: iapen 1s infinite; }
+.ia-pen i:nth-child(2) { animation-delay: .15s; } .ia-pen i:nth-child(3) { animation-delay: .3s; }
+@keyframes iapen { 50% { opacity: .25; } }
+.ia-sug { display: flex; flex-wrap: wrap; gap: 6px; }
+.ia-sug button { border: 1px solid var(--line); background: transparent; color: var(--text); border-radius: 99px; padding: 7px 12px; font: 14px system-ui, sans-serif; text-align: left; }
+.ia-form { display: flex; gap: 8px; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: #16191d; }
+.ia-form input { margin: 0; flex: 1; }
+.ia-form .btn { width: 52px; margin: 0; padding: 0; }
+.btn.ia-btn { background: transparent; border-color: var(--accent); color: var(--accent); }
