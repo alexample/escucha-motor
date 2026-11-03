@@ -649,7 +649,7 @@
     return L.join('\n');
   }
 
-  const EM = { analyze, absoluteFindings, compareTwo, freqDiff, buildReport, reportToText, BANDS, LIM };
+  const EM = { analyze, absoluteFindings, compareTwo, freqDiff, buildReport, reportToText, BANDS, LIM, fft, bandpass };
   if (typeof module !== 'undefined' && module.exports) module.exports = EM;
   else root.EM = EM;
 })(typeof window !== 'undefined' ? window : globalThis);

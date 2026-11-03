@@ -140,6 +140,17 @@
       b: `<p>Mide si en los agudos (3–8 kHz) hay un ruido de tipo «soplido» uniforme, como el del aire o los gases que se escapan, en lugar de tonos o golpes.</p>
         <p>Solo se usa al comparar fichas: si el siseo y la energía en agudos suben, apunta a una toma de aire, una fuga de escape o un manguito del turbo.</p>`
     },
+    isolate: {
+      t: 'Aislar el sonido anómalo',
+      b: `<p>Quita el sonido normal del motor y deja solo lo que destaca, amplificado para que lo oigas con claridad. Es la forma de saber <b>qué</b> ha detectado la app.</p>
+        <ul>
+          <li><b>Lo nuevo respecto a otra ficha:</b> usa una grabación de cuando el motor estaba bien como «huella» de su sonido normal y la resta frecuencia a frecuencia. Lo que queda es lo que ha aparecido después: silbidos, siseos, tonos nuevos, más ruido en una zona. Funciona mejor con fichas del mismo tipo de prueba y la misma colocación del móvil.</li>
+          <li><b>Lo que distingue a un cilindro:</b> la app sigue el ritmo de las explosiones, promedia cada cilindro por separado a lo largo de cientos de ciclos (así el ruido aleatorio se cancela) y resta lo que tienen en común. Queda lo que un cilindro hace distinto: el tic de un taqué o una válvula, el soplido de un inyector, un golpe de biela o una explosión débil. Si el motor está sano, casi no queda nada.</li>
+          <li><b>Golpes y ruidos sin ritmo:</b> lo contrario: quita todo lo que se repite en cada ciclo y deja los agudos que aparecen al azar, como el traqueteo de una cadena, un protector suelto o un roce.</li>
+          <li><b>Solo graves / solo agudos / solo el tono:</b> filtros sencillos para escuchar una zona concreta.</li>
+        </ul>
+        <p class="muted">Ningún filtro es perfecto: queda algo de sonido residual y puede sonar «metálico» o entrecortado. Si al quitar casi todo no queda nada reconocible, es buena señal.</p>`
+    },
     causes: {
       t: 'Posibles averías',
       b: `<p>La app compara los indicadores de la grabación (y los cambios respecto a la ficha anterior del mismo tipo) con un catálogo de unas 30 averías que producen ruido.</p>
