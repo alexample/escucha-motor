@@ -137,13 +137,13 @@
     return { pcm, sr };
   }
   async function reanalyzeOld(recs) {
-    const old = recs.filter(r => !r.features || (r.features.version || 1) < 5);
+    const old = recs.filter(r => !r.features || (r.features.version || 1) < 6);
     if (!old.length) return;
     toast(`Actualizando el análisis de ${old.length} ficha(s)…`, 4000);
     for (const r of old) {
       try {
         const { pcm, sr } = wavToPcm(r.audio);
-        r.features = EM.analyze(pcm, sr, S.vehicle.cylinders);
+        r.features = EM.analyzeMulti(pcm, sr, S.vehicle.cylinders, r.takesN || 1);
         await DB.putRec(r);
       } catch (e) { /* ficha dañada: se deja como está */ }
     }
@@ -218,12 +218,14 @@
     $('#checklist').innerHTML = items.map((c, i) => `<li><input type="checkbox" id="ck${i}" ${was.has(c) ? 'checked' : ''}><label for="ck${i}" style="margin:0;color:var(--text)">${esc(c)}</label></li>`).join('');
   }
   $('#testType').value = LS.get('testType', 'Ralentí en caliente');
-  $('#duration').value = String(LS.get('duration', 20));
+  $('#duration').value = String(LS.get('duration2', 15));
+  $('#takes').value = String(LS.get('takes', 3));
+  $('#takes').onchange = () => LS.set('takes', +$('#takes').value);
   $('#countdown').value = String(LS.get('countdown', 10));
   $('#countdown').onchange = () => LS.set('countdown', +$('#countdown').value);
   const buzz = p => { try { navigator.vibrate && navigator.vibrate(p); } catch (e) { } };
   $('#testType').onchange = () => { LS.set('testType', $('#testType').value); renderChecklist(); };
-  $('#duration').onchange = () => LS.set('duration', +$('#duration').value);
+  $('#duration').onchange = () => LS.set('duration2', +$('#duration').value);
   renderChecklist();
 
   let rec = null;
@@ -256,12 +258,13 @@
   }
 
   async function startRecording() {
-    const dur = +$('#duration').value;
+    const takes = +$('#takes').value || 1, each = +$('#duration').value;
+    const dur = takes * each;
     if (NATIVE) {
       if (!await askMic()) { micDenied(); return; }
       const st = JSON.parse(Bridge.recStart());
       if (!st.ok) { micDenied(st.error); return; }
-      rec = { native: true, chunks: [], recording: false, clip: false, level: -90, dur, t0: 0, wave: [], sr: st.sampleRate, source: st.source };
+      rec = { native: true, chunks: [], recording: false, clip: false, level: -90, dur, takes, each, t0: 0, wave: [], sr: st.sampleRate, source: st.source };
       rec.poll = setInterval(() => {
         try {
           const l = JSON.parse(Bridge.recLevel());
@@ -282,7 +285,7 @@
       const proc = ctx.createScriptProcessor(4096, 1, 1);
       const mute = ctx.createGain(); mute.gain.value = 0;
       src.connect(proc); proc.connect(mute); mute.connect(ctx.destination);
-      rec = { stream, ctx, proc, chunks: [], recording: false, clip: false, level: -90, dur, t0: 0, wave: [], sr: ctx.sampleRate, source: 'navegador' };
+      rec = { stream, ctx, proc, chunks: [], recording: false, clip: false, level: -90, dur, takes, each, t0: 0, wave: [], sr: ctx.sampleRate, source: 'navegador' };
       proc.onaudioprocess = ev => {
         const d = ev.inputBuffer.getChannelData(0);
         let s2 = 0, pk = 0;
@@ -305,9 +308,14 @@
       if (rec.native) Bridge.recReset();
       rec.recording = true; rec.clip = false; rec.t0 = performance.now(); buzz(300);
       $('#recMsg').textContent = 'Grabando…';
+      rec.cur = 1;
+      if (rec.takes > 1) $('#recMsg').textContent = `Grabando muestra 1 de ${rec.takes}…`;
       rec.timer = setInterval(() => {
-        const left = Math.max(0, rec.dur - (performance.now() - rec.t0) / 1000);
-        $('#recCount').textContent = Math.ceil(left);
+        const el = (performance.now() - rec.t0) / 1000;
+        const k = Math.min(rec.takes, Math.floor(el / rec.each) + 1);
+        if (k !== rec.cur) { rec.cur = k; buzz(120); $('#recMsg').textContent = `Grabando muestra ${k} de ${rec.takes}…`; }
+        const left = Math.max(0, rec.dur - el);
+        $('#recCount').textContent = Math.ceil(rec.takes > 1 ? Math.max(0, k * rec.each - el) : left);
         if (left <= 0) stopRecording(false);
       }, 200);
     }, 1000);
@@ -352,7 +360,7 @@
     }
     buzz([250, 150, 250]);
     if (!pcm.length) { toast('No se grabó audio'); $('#recSetup').classList.remove('hidden'); return; }
-    await processAudio(pcm, sr, r.native ? 'micrófono ' + r.source : 'micrófono (navegador)');
+    await processAudio(pcm, sr, r.native ? 'micrófono ' + r.source : 'micrófono (navegador)', r.takes);
   }
 
   $('#btnImport').onclick = () => $('#fileAudio').click();
@@ -369,7 +377,8 @@
       for (let c = 0; c < ch; c++) { const d = ab.getChannelData(c); for (let i = 0; i < n; i++) pcm[i] += d[i] / ch; }
       ctx.close();
       $('#recSetup').classList.add('hidden');
-      await processAudio(pcm, ab.sampleRate, 'archivo: ' + f.name);
+      const nt = +$('#takes').value || 1;
+      await processAudio(pcm, ab.sampleRate, 'archivo: ' + f.name, n / ab.sampleRate >= nt * 8 ? nt : 1);
     } catch (err) { toast('No se pudo leer ese audio (' + (err.message || err.name) + ')', 4000); }
   };
 
@@ -383,17 +392,17 @@
     return buf;
   }
 
-  async function processAudio(pcm, sr, source) {
+  async function processAudio(pcm, sr, source, takes) {
     $('#recSave').classList.remove('hidden');
     $('#saveQuality').innerHTML = '<p class="muted">Analizando…</p>'; $('#saveKpis').innerHTML = '';
     await new Promise(r => setTimeout(r, 50));
-    const features = EM.analyze(pcm, sr, S.vehicle.cylinders);
+    const features = EM.analyzeMulti(pcm, sr, S.vehicle.cylinders, takes || 1);
     const wav = encodeWav(pcm, sr);
-    S.pending = { features, wav, sr, source };
+    S.pending = { features, wav, sr, source, takes: features.takes ? features.takes.n : 1 };
     const qual = features.quality.length ? features.quality.map(q => `<div class="finding"><span class="pill ${q.level}">${q.level === 'alerta' ? 'Calidad' : 'Aviso'}</span><span>${esc(q.text)} ${Info.btn('reliable')}</span></div>`).join('')
       : '<div class="finding"><span class="pill ok">Bien</span><span>Grabación válida para comparar.</span></div>';
     const abs = EM.absoluteFindings(features).map(f => `<div class="finding"><span class="pill ${f.level}">${esc(f.area)}</span><span>${esc(f.text)} ${Info.area(f.area)}</span></div>`).join('');
-    $('#saveQuality').innerHTML = qual + abs;
+    $('#saveQuality').innerHTML = takesHtml(features) + qual + abs;
     $('#saveKpis').innerHTML = kpis(features);
     setPlayer($('#savePlayer'), wav);
     const last = S.recs[0];
@@ -402,8 +411,16 @@
     $('#fReasonText').value = ''; $('#fNotes').value = ''; $('#fAmbient').value = ''; $('#fWarm').value = '';
     $('#recSave').scrollIntoView({ behavior: 'smooth' });
   }
+  function takesHtml(f) {
+    const t = f.takes; if (!t || t.n <= 1) return '';
+    const ok = t.used.length, txt = ok === t.n ? `${t.n} muestras, todas coherentes: los valores son la mediana de las ${t.n}.`
+      : `Se usan ${ok} de ${t.n} muestras (las demás se han descartado).`;
+    return `<div class="finding"><span class="pill ${ok === t.n ? 'ok' : 'info'}">Muestras</span><span>${txt} ${Info.btn('takes')}</span></div>`;
+  }
   function kpis(f) {
-    const k = (v, l, key) => `<div class="kpi"><b>${v ?? '—'}</b><span>${l} ${Info.btn(key)}</span></div>`;
+    const sp = f.spread || {};
+    const pm = key => sp[key] != null && sp[key] > 0 ? `<small class="muted" style="display:block;font-size:11px;margin-top:-2px">±${String(key === 'cycleCv' ? Math.round(sp[key] * 100) : sp[key]).replace('.', ',')}</small>` : '';
+    const k = (v, l, key) => `<div class="kpi"><b>${v ?? '—'}</b>${pm(key)}<span>${l} ${Info.btn(key)}</span></div>`;
     return k(f.rpm ? f.rpm : '—', 'rpm estimadas', 'rpm') + k(f.periodicity != null ? Math.round(f.periodicity * 100) + '%' : '—', 'regularidad', 'periodicity') +
       k(f.imbalance ?? '—', 'desequilibrio cil.', 'imbalance') + k(f.weakPct != null ? f.weakPct + '%' : '—', 'explosiones débiles', 'weakPct') +
       k(f.hfKurtosis ?? '—', 'impulsividad agudos', 'hfKurtosis') + k(f.levelDb, 'nivel dBFS', 'levelDb') +
@@ -434,7 +451,7 @@
       reason: reason + (rt ? ' — ' + rt : ''), reasonCat: reason, reasonText: rt,
       testType: $('#testType').value, ambientC: $('#fAmbient').value === '' ? null : +$('#fAmbient').value,
       warmMin: $('#fWarm').value === '' ? null : +$('#fWarm').value, notes: $('#fNotes').value.trim(),
-      device: deviceName(), source: p.source, bandwidthHz: p.features.bandwidthHz, sampleRate: p.sr, audio: p.wav, features: p.features
+      device: deviceName(), source: p.source, takesN: p.takes, bandwidthHz: p.features.bandwidthHz, sampleRate: p.sr, audio: p.wav, features: p.features
     };
     await DB.putRec(r); S.pending = null;
     await loadRecs();
@@ -503,7 +520,7 @@
         <audio id="detPlayer" controls></audio>
       </div>
       <div class="card"><h2>Indicadores</h2><p class="muted small" style="margin-top:-4px">Pulsa «i» para ver qué significa cada dato.</p><div class="kpis">${kpis(f)}</div></div>
-      <div class="card"><h2>Lo que se oye</h2>${abs.length ? abs.map(x => `<div class="finding"><span class="pill ${x.level}">${esc(x.area || 'Calidad')}</span><span>${esc(x.text)} ${Info.area(x.area || 'Calidad')}</span></div>`).join('') : '<div class="finding"><span class="pill ok">Bien</span><span>Sin rasgos anómalos en esta grabación.</span></div>'}
+      <div class="card"><h2>Lo que se oye</h2>${takesHtml(f)}${abs.length ? abs.map(x => `<div class="finding"><span class="pill ${x.level}">${esc(x.area || 'Calidad')}</span><span>${esc(x.text)} ${Info.area(x.area || 'Calidad')}</span></div>`).join('') : '<div class="finding"><span class="pill ok">Bien</span><span>Sin rasgos anómalos en esta grabación.</span></div>'}
       ${f.tones.length ? `<p class="muted small">Tonos destacados: ${f.tones.map(t => t.hz + ' Hz').join(', ')} ${Info.btn('tones')}</p>` : ''}</div>
       ${causesHtml(Faults.diagnose(f, prev ? prev.features : null, { fuel: S.vehicle && S.vehicle.fuel, testType: r.testType }), f)}
       ${isolateCard(r)}

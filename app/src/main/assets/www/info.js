@@ -140,6 +140,16 @@
       b: `<p>Mide si en los agudos (3–8 kHz) hay un ruido de tipo «soplido» uniforme, como el del aire o los gases que se escapan, en lugar de tonos o golpes.</p>
         <p>Solo se usa al comparar fichas: si el siseo y la energía en agudos suben, apunta a una toma de aire, una fuga de escape o un manguito del turbo.</p>`
     },
+    takes: {
+      t: 'Tres muestras por ficha',
+      b: `<p>Con el móvil quieto debajo del motor, la app graba tres muestras seguidas (el móvil vibra brevemente entre una y otra) y las analiza por separado.</p>
+        <ul>
+          <li><b>Descarta las muestras raras:</b> si en una el régimen o el volumen se salen de lo normal (pasa un coche, salta el electroventilador, alguien habla), se descarta y la ficha usa las demás.</li>
+          <li><b>Valores más estables:</b> cada indicador es la mediana de las muestras válidas, y los tonos solo cuentan si aparecen en al menos dos.</li>
+          <li><b>Sabe cuánto varía tu motor:</b> la variación entre muestras (la cifra pequeña «±» bajo cada indicador) es el margen natural de tu motor. Al comparar fichas, solo se avisa de cambios mayores que el doble de ese margen, para evitar falsas alarmas.</li>
+        </ul>
+        <p class="muted">Para la máxima precisión en una ficha de referencia, puedes además repetir la ficha completa otro día en las mismas condiciones.</p>`
+    },
     isolate: {
       t: 'Aislar el sonido anómalo',
       b: `<p>Quita el sonido normal del motor y deja solo lo que destaca, amplificado para que lo oigas con claridad. Es la forma de saber <b>qué</b> ha detectado la app.</p>

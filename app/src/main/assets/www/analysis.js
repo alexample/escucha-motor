@@ -121,7 +121,7 @@
     const x0 = input.subarray ? input.subarray(start, end) : input.slice(start, end);
     const N = x0.length;
     const dur = N / sr;
-    const res = { version: 5, sampleRate: sr, duration: r1(dur), cylinders: cylinders, quality: [] };
+    const res = { version: 6, sampleRate: sr, duration: r1(dur), cylinders: cylinders, quality: [] };
     if (dur < 4) { res.quality.push({ level: 'alerta', text: 'Grabación demasiado corta (mínimo 5 s).' }); }
 
     // DC y nivel
@@ -364,6 +364,60 @@
     return res;
   }
 
+  // ---------- varias muestras en una ficha ----------
+  const NUM_KEYS = ['levelDb', 'peakDb', 'crest', 'clipPct', 'levelStdDb', 'centroidHz', 'flatness', 'hissFlatness', 'periodicity', 'firingHz', 'rpm',
+    'imbalance', 'cycleCv', 'weakEventsPerMin', 'weakPct', 'hfKurtosis', 'hfCrest', 'hfRatio', 'lfKurtosis', 'lfRatio', 'hfImbalance', 'rotKnock', 'rpmHuntPct'];
+  const SPREAD_KEYS = ['rpm', 'periodicity', 'imbalance', 'cycleCv', 'weakEventsPerMin', 'hfKurtosis', 'hfImbalance', 'rotKnock', 'lfKurtosis', 'rpmHuntPct', 'centroidHz', 'levelDb'];
+
+  function analyzeMulti(pcm, sr, cylinders, n) {
+    n = n || 1;
+    const segLen = Math.floor(pcm.length / n);
+    if (n <= 1 || segLen < sr * 6) { const f = analyze(pcm, sr, cylinders); f.takes = { n: 1, used: [1], discarded: [] }; return f; }
+    const all = [];
+    for (let i = 0; i < n; i++) all.push(analyze(pcm.subarray ? pcm.subarray(i * segLen, (i + 1) * segLen) : pcm.slice(i * segLen, (i + 1) * segLen), sr, cylinders));
+    // descartar muestras no fiables o que se salen de lo normal (ruido ajeno, régimen distinto)
+    let cand = all.map((f, i) => ({ f, i })).filter(o => o.f.reliable !== false);
+    const discarded = all.map((f, i) => ({ f, i })).filter(o => o.f.reliable === false).map(o => ({ i: o.i + 1, why: 'calidad insuficiente' }));
+    if (cand.length >= 3) {
+      const mRpm = median(cand.filter(o => o.f.rpm).map(o => o.f.rpm)), mLvl = median(cand.map(o => o.f.levelDb)), mStd = median(cand.map(o => o.f.levelStdDb));
+      cand = cand.filter(o => {
+        let why = null;
+        if (o.f.rpm && mRpm && Math.abs(o.f.rpm - mRpm) / mRpm > 0.05) why = `régimen distinto (${o.f.rpm} rpm)`;
+        else if (Math.abs(o.f.levelDb - mLvl) > 4) why = `volumen distinto (${r1(o.f.levelDb - mLvl)} dB)`;
+        else if (o.f.levelStdDb > 2 * mStd + 1) why = 'ruido ajeno durante la muestra';
+        if (why) discarded.push({ i: o.i + 1, why });
+        return !why;
+      });
+    }
+    const used = cand.length ? cand.map(o => o.f) : all;
+    const res = Object.assign({}, used[0]);
+    const med = vals => { const v = vals.filter(x => x != null && !Number.isNaN(x)); return v.length * 2 >= vals.length && v.length ? median(v) : null; };
+    NUM_KEYS.forEach(k => { const v = med(used.map(f => f[k])); res[k] = v == null ? null : (k === 'rpm' || k === 'centroidHz' ? Math.round(v) : r2(v)); });
+    res.bandwidthHz = Math.min(...used.map(f => f.bandwidthHz));
+    res.bands = {}; BANDS.forEach(b => { res.bands[b.id] = r1(median(used.map(f => f.bands[b.id]))); });
+    res.spectrum = used[0].spectrum.map((p, i) => [p[0], r1(median(used.map(f => f.spectrum[i] ? f.spectrum[i][1] : p[1])))]);
+    // tonos presentes en al menos 2 muestras
+    const pool = []; used.forEach((f, ti) => (f.tones || []).forEach(t => pool.push(Object.assign({ ti }, t))));
+    const groups = [];
+    pool.forEach(t => { const g = groups.find(g => Math.abs(g.hz - t.hz) / t.hz < 0.03); if (g) { g.items.push(t); } else groups.push({ hz: t.hz, items: [t] }); });
+    res.tones = groups.filter(g => new Set(g.items.map(t => t.ti)).size >= Math.min(2, used.length))
+      .map(g => ({ hz: Math.round(median(g.items.map(t => t.hz))), prom: r1(median(g.items.map(t => t.prom))) })).sort((a, b) => b.prom - a.prom).slice(0, 8);
+    // calidad
+    const seen = new Set(); res.quality = [];
+    used.forEach(f => f.quality.forEach(q => { if (!seen.has(q.text)) { seen.add(q.text); res.quality.push(q); } }));
+    discarded.sort((a, b) => a.i - b.i).forEach(d => res.quality.push({ level: 'info', text: `Muestra ${d.i} descartada: ${d.why}.` }));
+    res.reliable = cand.length > 0;
+    // variación entre muestras
+    if (used.length >= 2) {
+      res.spread = {};
+      SPREAD_KEYS.forEach(k => { const v = used.map(f => f[k]).filter(x => x != null); if (v.length >= 2) res.spread[k] = r2((Math.max(...v) - Math.min(...v)) / 2); });
+      res.spreadBands = {}; BANDS.forEach(b => { const v = used.map(f => f.bands[b.id]); res.spreadBands[b.id] = r1((Math.max(...v) - Math.min(...v)) / 2); });
+    }
+    res.duration = r1(used.reduce((a, f) => a + f.duration, 0));
+    res.takes = { n, used: cand.length ? cand.map(o => o.i + 1) : all.map((_, i) => i + 1), discarded };
+    return res;
+  }
+
   // ---------- criterios ----------
   const LIM = {
     periodicityLow: 0.35,
@@ -424,32 +478,38 @@
     if (A.testType !== B.testType) out.push({ level: 'aviso', area: 'Método', text: `Las fichas son de pruebas distintas (${A.testType} / ${B.testType}); la comparación es solo orientativa.` });
     if (A.device && B.device && A.device !== B.device) out.push({ level: 'aviso', area: 'Método', text: 'Grabadas con dispositivos distintos: las diferencias de timbre pueden deberse al micrófono.' });
 
+    // un cambio solo cuenta si supera la variación natural entre muestras de cada ficha
+    const sig = (key, d, bands) => {
+      const sa = ((bands ? fa.spreadBands : fa.spread) || {})[key] || 0, sb = ((bands ? fb.spreadBands : fb.spread) || {})[key] || 0;
+      return Math.abs(d) > 2 * (sa + sb);
+    };
     const dl = fb.levelDb - fa.levelDb;
-    if (Math.abs(dl) >= LIM.levelChange) out.push({ level: 'info', area: 'Volumen', text: `El volumen general ${dl > 0 ? 'sube' : 'baja'} ${r1(Math.abs(dl))} dB. Si la posición del móvil fue la misma, el motor ${dl > 0 ? 'suena más fuerte' : 'suena más bajo'} (escape, aislamiento, régimen).` });
+    if (Math.abs(dl) >= LIM.levelChange && sig('levelDb', dl)) out.push({ level: 'info', area: 'Volumen', text: `El volumen general ${dl > 0 ? 'sube' : 'baja'} ${r1(Math.abs(dl))} dB. Si la posición del móvil fue la misma, el motor ${dl > 0 ? 'suena más fuerte' : 'suena más bajo'} (escape, aislamiento, régimen).` });
 
     if (fa.rpm && fb.rpm) {
       const ch = (fb.rpm - fa.rpm) / fa.rpm;
-      if (Math.abs(ch) >= LIM.rpmChange && A.testType === B.testType) out.push({ level: 'aviso', area: 'Régimen', text: `El régimen estimado pasa de ${fa.rpm} a ${fb.rpm} rpm (${ch > 0 ? '+' : ''}${Math.round(ch * 100)}%). En ralentí caliente debería mantenerse: revisar temperatura del motor, válvula de ralentí/mariposa o tomas de aire.` });
+      if (Math.abs(ch) >= LIM.rpmChange && A.testType === B.testType && sig('rpm', fb.rpm - fa.rpm)) out.push({ level: 'aviso', area: 'Régimen', text: `El régimen estimado pasa de ${fa.rpm} a ${fb.rpm} rpm (${ch > 0 ? '+' : ''}${Math.round(ch * 100)}%). En ralentí caliente debería mantenerse: revisar temperatura del motor, válvula de ralentí/mariposa o tomas de aire.` });
     } else if (fa.rpm && !fb.rpm) out.push({ level: 'aviso', area: 'Ritmo', text: 'En la ficha nueva ya no se distingue el ritmo de combustión que sí se veía antes.' });
 
-    const deltaMetric = (name, va, vb, warn, alert, unit, fmt, explain) => {
+    const deltaMetric = (name, va, vb, warn, alert, unit, fmt, explain, key) => {
       if (va == null || vb == null) return;
       const d = vb - va;
+      if (key && !sig(key, d)) return;
       if (d >= alert) out.push({ level: 'alerta', area: name, text: `${explain} (${fmt(va)} → ${fmt(vb)}${unit}).` });
       else if (d >= warn) out.push({ level: 'aviso', area: name, text: `${explain} (${fmt(va)} → ${fmt(vb)}${unit}).` });
     };
-    deltaMetric('Cilindros', fa.imbalance, fb.imbalance, 0.15, 0.3, '', v => v, 'Aumenta el desequilibrio entre cilindros');
-    deltaMetric('Ralentí', fa.cycleCv, fb.cycleCv, 0.08, 0.15, '%', v => Math.round(v * 100), 'Aumenta la irregularidad entre explosiones');
-    deltaMetric('Fallos', fa.weakEventsPerMin, fb.weakEventsPerMin, 5, 15, '/min', v => v, 'Aumentan las explosiones débiles');
-    if (fa.hfKurtosis > 0 && fb.hfKurtosis > 0) {
+    deltaMetric('Cilindros', fa.imbalance, fb.imbalance, 0.15, 0.3, '', v => v, 'Aumenta el desequilibrio entre cilindros', 'imbalance');
+    deltaMetric('Ralentí', fa.cycleCv, fb.cycleCv, 0.08, 0.15, '%', v => Math.round(v * 100), 'Aumenta la irregularidad entre explosiones', 'cycleCv');
+    deltaMetric('Fallos', fa.weakEventsPerMin, fb.weakEventsPerMin, 5, 15, '/min', v => v, 'Aumentan las explosiones débiles', 'weakEventsPerMin');
+    if (fa.hfKurtosis > 0 && fb.hfKurtosis > 0 && sig('hfKurtosis', fb.hfKurtosis - fa.hfKurtosis)) {
       const ratio = fb.hfKurtosis / fa.hfKurtosis;
       if (ratio >= 1.8) out.push({ level: 'alerta', area: 'Golpeteo', text: `Los golpes metálicos en agudos aumentan claramente (impulsividad ${fa.hfKurtosis} → ${fb.hfKurtosis}): taqués, distribución, inyectores o picado.` });
       else if (ratio >= 1.3) out.push({ level: 'aviso', area: 'Golpeteo', text: `Aumentan algo los golpes metálicos en agudos (impulsividad ${fa.hfKurtosis} → ${fb.hfKurtosis}).` });
     }
-    deltaMetric('Un cilindro', fa.hfImbalance, fb.hfImbalance, 0.06, 0.12, '', v => v, 'Aumenta el ruido agudo de un solo cilindro (taqué, válvula, inyector)');
-    deltaMetric('Golpe grave', fa.rotKnock, fb.rotKnock, 0.15, 0.3, '', v => v, 'Aumenta el golpe grave una vez por vuelta (biela, bancada, polea)');
-    deltaMetric('Ralentí oscila', fa.rpmHuntPct, fb.rpmHuntPct, 1.5, 3, '%', v => v, 'El ralentí oscila más');
-    if (fa.lfKurtosis > 0 && fb.lfKurtosis > 0 && fb.lfKurtosis / fa.lfKurtosis >= 1.4)
+    deltaMetric('Un cilindro', fa.hfImbalance, fb.hfImbalance, 0.06, 0.12, '', v => v, 'Aumenta el ruido agudo de un solo cilindro (taqué, válvula, inyector)', 'hfImbalance');
+    deltaMetric('Golpe grave', fa.rotKnock, fb.rotKnock, 0.15, 0.3, '', v => v, 'Aumenta el golpe grave una vez por vuelta (biela, bancada, polea)', 'rotKnock');
+    deltaMetric('Ralentí oscila', fa.rpmHuntPct, fb.rpmHuntPct, 1.5, 3, '%', v => v, 'El ralentí oscila más', 'rpmHuntPct');
+    if (fa.lfKurtosis > 0 && fb.lfKurtosis > 0 && fb.lfKurtosis / fa.lfKurtosis >= 1.4 && sig('lfKurtosis', fb.lfKurtosis - fa.lfKurtosis))
       out.push({ level: fb.lfKurtosis / fa.lfKurtosis >= 2 ? 'alerta' : 'aviso', area: 'Golpes graves', text: `Aumentan los golpes en graves (impulsividad ${fa.lfKurtosis} → ${fb.lfKurtosis}).` });
     if (fa.hissFlatness != null && fb.hissFlatness != null && fb.hissFlatness - fa.hissFlatness >= 0.04 && (fb.bands.b5 - fa.bands.b5 >= 3 || fb.bands.b6 - fa.bands.b6 >= 3))
       out.push({ level: 'aviso', area: 'Siseo', text: 'Aparece más siseo de aire o gases en agudos: toma de aire, fuga de escape o manguito del turbo.' });
@@ -458,14 +518,14 @@
 
     BANDS.forEach(b => {
       const d = fb.bands[b.id] - fa.bands[b.id];
-      if (Math.abs(d) >= LIM.bandChange) {
+      if (Math.abs(d) >= LIM.bandChange && sig(b.id, d, true)) {
         const lvl = Math.abs(d) >= LIM.bandChangeAlert && d > 0 ? 'alerta' : (d > 0 ? 'aviso' : 'info');
         out.push({ level: lvl, area: 'Timbre', text: `${b.name} (${b.lo}–${b.hi} Hz) ${d > 0 ? 'ganan' : 'pierden'} ${r1(Math.abs(d))} dB respecto al resto del sonido. Zona asociada a: ${b.desc}.` });
       }
     });
 
     const cc = (fb.centroidHz - fa.centroidHz) / fa.centroidHz;
-    if (Math.abs(cc) >= LIM.centroidChange) out.push({ level: 'info', area: 'Timbre', text: `El sonido es más ${cc > 0 ? 'agudo/metálico' : 'grave/apagado'} (centro tonal ${fa.centroidHz} → ${fb.centroidHz} Hz).` });
+    if (Math.abs(cc) >= LIM.centroidChange && sig('centroidHz', fb.centroidHz - fa.centroidHz)) out.push({ level: 'info', area: 'Timbre', text: `El sonido es más ${cc > 0 ? 'agudo/metálico' : 'grave/apagado'} (centro tonal ${fa.centroidHz} → ${fb.centroidHz} Hz).` });
 
     const within = (list, hz, tol) => (list || []).find(u => Math.abs(u.hz - hz) / hz <= tol);
     (fb.tones || []).forEach(t => {
@@ -654,7 +714,7 @@
     return L.join('\n');
   }
 
-  const EM = { analyze, absoluteFindings, compareTwo, freqDiff, buildReport, reportToText, BANDS, LIM, fft, bandpass };
+  const EM = { analyze, analyzeMulti, absoluteFindings, compareTwo, freqDiff, buildReport, reportToText, BANDS, LIM, fft, bandpass };
   if (typeof module !== 'undefined' && module.exports) module.exports = EM;
   else root.EM = EM;
 })(typeof window !== 'undefined' ? window : globalThis);
