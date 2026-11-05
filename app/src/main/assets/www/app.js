@@ -521,9 +521,9 @@
         <audio id="detPlayer" controls></audio>
       </div>
       <div class="card"><h2>Indicadores</h2><p class="muted small" style="margin-top:-4px">Pulsa «i» para ver qué significa cada dato.</p><div class="kpis">${kpis(f)}</div></div>
-      <div class="card"><h2>Lo que se oye</h2>${takesHtml(f)}${abs.length ? abs.map(x => `<div class="finding"><span class="pill ${x.level}">${esc(x.area || 'Calidad')}</span><span>${esc(x.text)} ${Info.area(x.area || 'Calidad')}</span></div>`).join('') : '<div class="finding"><span class="pill ok">Bien</span><span>Sin rasgos anómalos en esta grabación.</span></div>'}
+      <div class="card"><h2>Lo que se oye</h2>${takesHtml(f)}${abs.length ? abs.map(x => `<div class="finding"><span class="pill ${x.level}">${esc(x.area || 'Calidad')}</span><span>${esc(x.text)} ${Info.area(x.area || 'Calidad')}${x.area ? playBtn(r.id, presetForFinding(x, prev && prev.id), x.area) : ''}</span></div>`).join('') : '<div class="finding"><span class="pill ok">Bien</span><span>Sin rasgos anómalos en esta grabación.</span></div>'}
       ${f.tones.length ? `<p class="muted small">Tonos destacados: ${f.tones.map(t => t.hz + ' Hz').join(', ')} ${Info.btn('tones')}</p>` : ''}</div>
-      ${causesHtml(Faults.diagnose(f, prev ? prev.features : null, { fuel: S.vehicle && S.vehicle.fuel, testType: r.testType }), f)}
+      ${causesHtml(Faults.diagnose(f, prev ? prev.features : null, { fuel: S.vehicle && S.vehicle.fuel, testType: r.testType }), f, r.id, prev && prev.id)}
       ${isolateCard(r)}
       <div class="card"><h2>Espectro ${Info.btn('spectrum')}</h2><canvas class="chart" id="detChart"></canvas></div>
       <button class="btn ia-btn" id="detIA">✦ Pregúntale a la IA sobre esta ficha</button>
@@ -562,13 +562,13 @@
   }
 
   // ---------- posibles averías ----------
-  function causesHtml(list, f) {
+  function causesHtml(list, f, recId, refId) {
     if (f && f.reliable === false) return `<div class="card"><h2>Posibles averías ${Info.btn('causes')}</h2><p class="muted">No se evalúan porque la grabación no tiene calidad suficiente.</p></div>`;
     const cls = sc => sc >= 0.6 ? 'alerta' : sc >= 0.45 ? 'aviso' : 'info';
     return `<div class="card"><h2>Posibles averías ${Info.btn('causes')}</h2>
       ${list.length ? list.map(c => `<div class="finding"><span class="pill ${cls(c.score)}">${Faults.likelihood(c.score)}</span>
         <span><b>${esc(c.name)}</b> <button type="button" class="ib" data-fault="${c.id}" aria-label="Ver avería">i</button><br>
-        <span class="muted small">${esc(c.sys)} · urgencia ${c.urg}</span><br><span class="small">Indicios: ${esc(c.ev.join('; '))}.</span></span></div>`).join('')
+        <span class="muted small">${esc(c.sys)} · urgencia ${c.urg}</span><br><span class="small">Indicios: ${esc(c.ev.join('; '))}.</span>${recId ? '<br>' + playBtn(recId, presetForFault(c.id, recId, refId), c.name) : ''}</span></div>`).join('')
         : '<p class="muted">Ninguna avería del catálogo encaja con este sonido.</p>'}
       <p class="muted small">Orientativo: varias averías suenan parecido. Confírmalo en el taller.</p></div>`;
   }
@@ -584,73 +584,171 @@
   function isolateCard(r) {
     const f = r.features;
     const others = S.recs.filter(x => x.id !== r.id);
-    const ref = others.filter(x => x.testType === r.testType && x.features.reliable !== false)
-      .sort((a, b) => (/referencia/i.test(b.reason) - /referencia/i.test(a.reason)) || a.km - b.km)[0];
+    const ref = defaultRef(r);
     const rec = [];
     if (f.hfImbalance >= 0.08 || f.rotKnock >= 0.3 || f.imbalance >= 0.2) rec.push('cyl');
-    if (f.hfRatio >= 1.6 && !(f.hfImbalance >= 0.08)) rec.push('irregular');
+    if (f.hfRatio >= 1.6 && !(f.hfImbalance >= 0.08)) rec.push('nonsync');
     if (f.tones && f.tones.length) rec.push('tone');
     if (ref && !rec.length) rec.push('new');
     const opt = (v, label, dis) => `<option value="${v}" ${dis ? 'disabled' : ''}>${label}${rec[0] === v ? ' (recomendado)' : ''}</option>`;
     return `<div class="card"><h2>Aislar el sonido anómalo ${Info.btn('isolate')}</h2>
-      <p class="muted small">Quita el sonido normal del motor y deja lo que destaca, amplificado para escucharlo.</p>
+      <p class="muted small">Quita el sonido normal del motor y deja lo que destaca. También puedes pulsar ▶ junto a cada aviso o avería.</p>
       <label>Qué dejar
         <select id="isoMode">
           ${opt('new', 'Lo nuevo respecto a otra ficha', !others.length)}
           ${opt('cyl', 'Lo que distingue a un cilindro (tics, golpes, fallos)', !f.firingHz)}
-          ${opt('irregular', 'Golpes y ruidos sin ritmo (traqueteos)', !f.firingHz)}
-          ${opt('low', 'Solo graves 100–1.000 Hz (biela, volante, soportes)')}
-          ${opt('high', 'Solo agudos 2–8 kHz (taqués, silbidos, siseos)')}
+          ${opt('nonsync', 'Lo que no va al ritmo del motor (accesorios, turbo, siseos, traqueteos)', !f.firingHz)}
           ${opt('tone', 'Solo el tono destacado' + (f.tones && f.tones.length ? ` (${f.tones[0].hz} Hz)` : ''), !(f.tones && f.tones.length))}
+          ${opt('band', 'Solo filtrar por zona de frecuencias')}
+        </select></label>
+      <label id="isoZoneRow">Zona de frecuencias
+        <select id="isoZone">
+          <option value="">Todas</option><option value="60-1000">Graves 60–1.000 Hz (biela, volante, soportes)</option>
+          <option value="1000-3000">Medios 1–3 kHz (distribución, inyectores)</option><option value="2000-8000">Agudos 2–8 kHz (taqués, silbidos, siseos)</option>
+          <option value="8000-16000">Muy agudos 8–16 kHz (roces, fugas de aire)</option>
         </select></label>
       <label id="isoRefRow">Ficha de referencia (motor sano)
         <select id="isoRef">${others.map(x => `<option value="${x.id}" ${ref && x.id === ref.id ? 'selected' : ''}>${fmtKm(x.km)} · ${esc(x.testType)} · ${esc(x.reasonCat || x.reason).slice(0, 40)}</option>`).join('')}</select></label>
-      <button class="btn primary" id="isoGo">Aislar y escuchar</button>
-      <div id="isoOut" class="hidden"><p class="small" id="isoTxt"></p><audio id="isoPlayer" controls></audio>
-        <button class="btn ghost" id="isoWav">Exportar este audio (WAV)</button></div></div>`;
+      <button class="btn primary" id="isoGo">Aislar y escuchar</button></div>`;
   }
   function bindIsolate(r) {
     const mode = $('#isoMode'); if (!mode) return;
     const rec = Array.from(mode.options).find(o => /recomendado/.test(o.textContent) && !o.disabled) || Array.from(mode.options).find(o => !o.disabled);
     if (rec) mode.value = rec.value;
-    const sync = () => $('#isoRefRow').classList.toggle('hidden', mode.value !== 'new');
+    const sync = () => { $('#isoRefRow').classList.toggle('hidden', mode.value !== 'new'); $('#isoZoneRow').classList.toggle('hidden', mode.value === 'tone'); if (mode.value === 'band' && !$('#isoZone').value) $('#isoZone').value = '2000-8000'; };
     mode.onchange = sync; sync();
-    let lastWav = null;
-    $('#isoGo').onclick = async () => {
-      const btn = $('#isoGo'); btn.disabled = true; btn.textContent = 'Procesando…';
-      await new Promise(res => setTimeout(res, 30));
-      try {
-        const { pcm, sr } = wavToPcm(r.audio), f = r.features;
-        let y, what;
-        if (mode.value === 'new') {
-          const ref = await DB.getRec($('#isoRef').value);
-          const R = wavToPcm(ref.audio);
-          y = Isolate.subtractReference(pcm, sr, R.pcm, R.sr);
-          what = `lo que no estaba en la ficha de ${fmtKm(ref.km)}`;
-          if (ref.testType !== r.testType) what += ' (ojo: es de otro tipo de prueba)';
-        } else if (mode.value === 'cyl') { y = Isolate.syncResidual(pcm, sr, f.firingHz, S.vehicle.cylinders, 'cyl'); what = 'lo que distingue a cada cilindro de los demás'; }
-        else if (mode.value === 'irregular') { y = Isolate.syncResidual(pcm, sr, f.firingHz, S.vehicle.cylinders, 'irregular'); what = 'los ruidos que no se repiten en cada ciclo'; }
-        else if (mode.value === 'low') { y = Isolate.band(pcm, sr, 100, 1000); what = 'solo los graves (100–1.000 Hz)'; }
-        else if (mode.value === 'high') { y = Isolate.band(pcm, sr, 2000, 8000); what = 'solo los agudos (2–8 kHz)'; }
-        else { const hz = f.tones[0].hz; y = Isolate.band(pcm, sr, hz * 0.96, hz * 1.04); what = `solo el tono de ${hz} Hz`; }
-        const out = Isolate.finish(pcm, y);
-        lastWav = encodeWav(out.pcm, sr);
-        setPlayer($('#isoPlayer'), lastWav);
-        const removed = Math.max(0, Math.min(99.9, 100 * (1 - Math.pow(10, out.keptDb / 10))));
-        $('#isoTxt').innerHTML = `Resultado: ${esc(what)}. Se ha quitado el ${removed.toLocaleString('es-ES', { maximumFractionDigits: 1 })}% de la energía del sonido (queda ${out.keptDb} dB) y se ha amplificado para escucharlo.` +
-          (out.keptDb < -30 && (mode.value === 'cyl' || mode.value === 'new') ? ' <b>Apenas queda nada: no hay un sonido anómalo destacable con este método.</b>' : '');
-        $('#isoOut').classList.remove('hidden');
-        $('#isoPlayer').play().catch(() => { });
-      } catch (e) { toast('No se pudo procesar: ' + (e.message || e), 4000); }
-      btn.disabled = false; btn.textContent = 'Aislar y escuchar';
-    };
-    $('#isoWav').onclick = () => {
-      if (!lastWav) return;
-      const name = `aislado-${mode.value}-${r.km}km.wav`;
-      if (Bridge && Bridge.saveBase64) { Bridge.saveBase64(name, 'audio/wav', abToB64(lastWav)); return; }
-      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([lastWav], { type: 'audio/wav' })); a.download = name; a.click();
+    $('#isoGo').onclick = () => {
+      const z = $('#isoZone').value.split('-').map(Number), pr = { mode: mode.value };
+      if (z.length === 2 && z[0]) { pr.lo = z[0]; pr.hi = z[1]; }
+      if (mode.value === 'new') pr.ref = $('#isoRef').value;
+      if (mode.value === 'tone') pr.hz = r.features.tones[0].hz;
+      if (mode.value === 'band' && !pr.lo) { pr.lo = 2000; pr.hi = 8000; }
+      playIsolated(r.id, pr, mode.options[mode.selectedIndex].textContent.replace(' (recomendado)', ''));
     };
   }
+
+  // ---------- escuchar el fallo: filtros preparados para cada aviso y avería ----------
+  function defaultRef(r) {
+    return S.recs.filter(x => x.id !== r.id && x.testType === r.testType && x.features.reliable !== false && (x.km < r.km || (x.km === r.km && x.date < r.date)))
+      .sort((a, b) => (/referencia/i.test(b.reason) - /referencia/i.test(a.reason)) || b.km - a.km)[0] || null;
+  }
+  function presetForFinding(x, refId) {
+    switch (x.area) {
+      case 'Cilindros': case 'Fallos': case 'Ralentí': return { mode: 'cyl' };
+      case 'Un cilindro': return { mode: 'cyl', lo: 1000, hi: 12000 };
+      case 'Golpe grave': return { mode: 'cyl', lo: 60, hi: 1000 };
+      case 'Golpes graves': return { mode: 'nonsync', lo: 60, hi: 1000 };
+      case 'Golpeteo': return { mode: 'nonsync', lo: 1500, hi: 12000 };
+      case 'Siseo': return refId ? { mode: 'new', ref: refId, lo: 3000, hi: 12000 } : { mode: 'nonsync', lo: 3000, hi: 12000 };
+      case 'Tono nuevo': case 'Tono desplazado': return x.hz ? { mode: 'tone', hz: x.hz } : null;
+      case 'Timbre': return refId ? Object.assign({ mode: 'new', ref: refId }, x.band ? { lo: x.band[0], hi: x.band[1] } : {}) : (x.band ? { mode: 'band', lo: x.band[0], hi: x.band[1] } : null);
+      case 'Volumen': case 'Régimen': case 'Ritmo': case 'Estabilidad': case 'Ralentí oscila': return { mode: 'orig' };
+      default: return null;
+    }
+  }
+  function presetForFault(id, recId, refId) {
+    const r = S.recs.find(x => x.id === recId), f = r ? r.features : {};
+    const tone = (lo, hi) => (f.tones || []).find(t => t.hz >= lo && t.hz <= hi);
+    const cyl = { misfire: 1, compression: 1, headgasket: 1, glow: 1, injector_drip: 1, egr: 1 };
+    if (cyl[id]) return { mode: 'cyl' };
+    if (['injector_seal', 'lifter', 'manifold_leak'].includes(id)) return { mode: 'cyl', lo: 1000, hi: 12000 };
+    if (['injector_noise', 'oil', 'chain', 'heatshield'].includes(id)) return { mode: 'nonsync', lo: 1500, hi: 12000 };
+    if (['rod', 'main_bearing', 'damper', 'piston_slap'].includes(id)) return { mode: 'cyl', lo: 60, hi: 1000 };
+    if (['dmf', 'mounts'].includes(id)) return { mode: 'nonsync', lo: 40, hi: 1000 };
+    if (['belt_squeal', 'bearing', 'belt_timing', 'hp_pump', 'turbo_whistle'].includes(id)) {
+      const t = tone(300, 12000); return t ? { mode: 'tone', hz: t.hz } : (refId ? { mode: 'new', ref: refId, lo: 1000, hi: 12000 } : { mode: 'nonsync', lo: 1000, hi: 12000 });
+    }
+    if (['vacuum', 'boost_leak'].includes(id)) return refId ? { mode: 'new', ref: refId, lo: 2000, hi: 14000 } : { mode: 'nonsync', lo: 3000, hi: 12000 };
+    if (id === 'exhaust_leak') return refId ? { mode: 'new', ref: refId, lo: 20, hi: 400 } : { mode: 'band', lo: 20, hi: 400 };
+    if (id === 'idle') return { mode: 'orig' };
+    return null;
+  }
+  function playBtn(recId, preset, label) {
+    if (!preset || !recId) return '';
+    const data = esc(JSON.stringify({ r: recId, p: preset, t: label }));
+    return ` <button type="button" class="play" data-play="${data}" aria-label="Escuchar ${esc(label)}">▶ ${preset.mode === 'orig' ? 'Escuchar' : 'Escuchar aislado'}</button>`;
+  }
+  const MODE_TXT = { new: 'Lo nuevo frente a otra ficha', cyl: 'Lo propio de un cilindro', nonsync: 'Lo que no va al ritmo del motor', tone: 'Solo el tono', band: 'Filtro por zona', orig: 'Grabación original' };
+  const ISO_CACHE = new Map();
+  async function isolateRun(r, pr) {
+    const key = r.id + JSON.stringify(pr);
+    if (ISO_CACHE.has(key)) return ISO_CACHE.get(key);
+    const { pcm, sr } = wavToPcm(r.audio), f = r.features;
+    let y = pcm, note = '';
+    let mode = pr.mode;
+    if ((mode === 'cyl' || mode === 'nonsync') && !f.firingHz) { mode = 'band'; note = 'No se detecta el ritmo del motor: solo se filtra por zona. '; }
+    if (mode === 'new') {
+      const ref = pr.ref && await DB.getRec(pr.ref);
+      if (ref) { const R = wavToPcm(ref.audio); y = Isolate.subtractReference(pcm, sr, R.pcm, R.sr); note = `Referencia: ficha de ${fmtKm(ref.km)}${ref.testType !== r.testType ? ' (otro tipo de prueba)' : ''}. `; }
+      else { mode = 'band'; }
+    } else if (mode === 'cyl' || mode === 'nonsync') {
+      const o = Isolate.syncResidual(pcm, sr, f.firingHz, S.vehicle.cylinders, mode);
+      y = o.pcm;
+      const N = S.vehicle.cylinders;
+      if (mode === 'cyl' && N > 2) {
+        const even = 1 / N, hfT = even + (1 - even) * 0.45, lfT = even + (1 - even) * 0.4;
+        if (o.hfShare >= hfT) note += `El ruido agudo se concentra en 1 de cada ${N} explosiones: viene de un cilindro concreto. `;
+        else if (o.lfShare >= lfT) note += `La diferencia de fuerza se concentra en 1 de cada ${N} explosiones: un cilindro trabaja distinto. `;
+        else note += 'No se concentra en un único cilindro. ';
+      }
+    } else if (mode === 'tone') { y = Isolate.narrow(pcm, sr, pr.hz); note = `Banda estrecha alrededor de ${pr.hz} Hz. `; }
+    if (mode !== 'orig' && mode !== 'tone' && pr.lo) y = Isolate.band(y, sr, pr.lo, pr.hi);
+    if (mode === 'band' && !pr.lo) y = Isolate.band(y, sr, 1000, 12000);
+    const out = mode === 'orig' ? { pcm, keptDb: 0 } : Isolate.finish(pcm, y);
+    const removed = Math.max(0, Math.min(99.9, 100 * (1 - Math.pow(10, out.keptDb / 10))));
+    const zone = pr.lo ? ` · ${pr.lo >= 1000 ? pr.lo / 1000 + ' k' : pr.lo}–${pr.hi >= 1000 ? pr.hi / 1000 + ' k' : pr.hi}Hz` : '';
+    const res = { wav: encodeWav(out.pcm, sr), info: (MODE_TXT[mode] || '') + zone + (mode === 'orig' ? '' : ` · quitado el ${removed.toLocaleString('es-ES', { maximumFractionDigits: 1 })}% del sonido`), note };
+    ISO_CACHE.set(key, res);
+    if (ISO_CACHE.size > 12) ISO_CACHE.delete(ISO_CACHE.keys().next().value);
+    return res;
+  }
+
+  // reproductor con comparación Original / Aislado en el mismo punto
+  const PL = { audio: new Audio(), urls: {}, view: 'iso', wavIso: null, name: '' };
+  function plSet(view, keepTime) {
+    const t = keepTime ? PL.audio.currentTime : 0, playing = !PL.audio.paused;
+    PL.view = view;
+    PL.audio.src = PL.urls[view];
+    PL.audio.addEventListener('loadedmetadata', () => { try { PL.audio.currentTime = Math.min(t, PL.audio.duration || t); } catch (e) { } if (playing || !keepTime) PL.audio.play().catch(() => { }); }, { once: true });
+    $$('#plSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === view));
+  }
+  async function playIsolated(recId, pr, label) {
+    const r = await DB.getRec(recId); if (!r) return;
+    $('#player').classList.remove('hidden'); document.body.classList.add('pl-on');
+    $('#plTitle').textContent = label; $('#plSub').textContent = 'Procesando…'; $('#plPlay').textContent = '…';
+    PL.audio.pause();
+    await new Promise(res => setTimeout(res, 30));
+    try {
+      const res = await isolateRun(r, pr);
+      Object.values(PL.urls).forEach(u => URL.revokeObjectURL(u));
+      PL.urls = { iso: URL.createObjectURL(new Blob([res.wav], { type: 'audio/wav' })), orig: URL.createObjectURL(new Blob([r.audio], { type: 'audio/wav' })) };
+      PL.wavIso = res.wav; PL.name = `aislado-${pr.mode}-${r.km}km.wav`;
+      $('#plSub').textContent = `${fmtKm(r.km)} · ${res.note}${res.info}`;
+      $('#plSeg').classList.toggle('hidden', pr.mode === 'orig'); $('#plWav').classList.toggle('hidden', pr.mode === 'orig');
+      plSet(pr.mode === 'orig' ? 'orig' : 'iso', false);
+    } catch (e) { $('#plSub').textContent = 'No se pudo procesar: ' + (e.message || e); }
+  }
+  PL.audio.addEventListener('play', () => { $('#plPlay').textContent = '❚❚'; });
+  PL.audio.addEventListener('pause', () => { $('#plPlay').textContent = '▶'; });
+  PL.audio.addEventListener('timeupdate', () => {
+    const d = PL.audio.duration || 0, t = PL.audio.currentTime || 0;
+    $('#plBar').style.width = d ? (100 * t / d) + '%' : '0';
+    $('#plTime').textContent = `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+  });
+  $('#plPlay').onclick = () => { if (PL.audio.paused) PL.audio.play().catch(() => { }); else PL.audio.pause(); };
+  $$('#plSeg button').forEach(b => b.onclick = () => { if (b.dataset.v !== PL.view) plSet(b.dataset.v, true); });
+  $('#plProg').onclick = e => { const d = PL.audio.duration; if (!d) return; const rc = e.currentTarget.getBoundingClientRect(); PL.audio.currentTime = d * (e.clientX - rc.left) / rc.width; };
+  $('#plClose').onclick = () => { PL.audio.pause(); $('#player').classList.add('hidden'); document.body.classList.remove('pl-on'); };
+  $('#plWav').onclick = () => {
+    if (!PL.wavIso) return;
+    if (Bridge && Bridge.saveBase64) { Bridge.saveBase64(PL.name, 'audio/wav', abToB64(PL.wavIso)); return; }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([PL.wavIso], { type: 'audio/wav' })); a.download = PL.name; a.click();
+  };
+  document.addEventListener('click', e => {
+    const b = e.target.closest('[data-play]'); if (!b) return;
+    e.preventDefault(); e.stopPropagation();
+    try { const d = JSON.parse(b.dataset.play); playIsolated(d.r, d.p, d.t); } catch (err) { }
+  }, true);
 
   // ---------- asistente con IA ----------
   const IA = { hist: [], ocupado: false, ctx: null };
@@ -839,13 +937,13 @@
     S.report = rep;
     const sorted = rep.records;
     const tag = { alerta: 'Anomalía', aviso: 'Vigilar', info: 'Info' };
-    const fl = list => list.length ? list.map(f => `<div class="finding"><span class="pill ${f.level}">${tag[f.level]}</span><span><b>${esc(f.area)}.</b> ${esc(f.text)} ${Info.area(f.area)}</span></div>`).join('') : '<div class="finding"><span class="pill ok">OK</span><span>Sin diferencias relevantes.</span></div>';
+    const fl = (list, recId, refId) => list.length ? list.map(f => `<div class="finding"><span class="pill ${f.level}">${tag[f.level]}</span><span><b>${esc(f.area)}.</b> ${esc(f.text)} ${Info.area(f.area)}${recId ? playBtn(recId, presetForFinding(f, refId), f.area) : ''}</span></div>`).join('') : '<div class="finding"><span class="pill ok">OK</span><span>Sin diferencias relevantes.</span></div>';
     const row = (label, fn, key) => `<tr><td>${label} ${key ? Info.btn(key) : ''}</td>${sorted.map(r => `<td>${fn(r.features) ?? '—'}</td>`).join('')}</tr>`;
     const statusTxt = { ok: 'Sin anomalías', aviso: 'Aspectos a vigilar', alerta: 'Anomalías detectadas' };
     $('#reportBody').innerHTML = `
       <button class="link" data-go="fichas">‹ Fichas</button>
       <div class="status ${rep.status}">${statusTxt[rep.status]}<div style="font-weight:400;margin-top:6px">${rep.summary.map(esc).join('<br>')}</div></div>
-      ${rep.causes ? causesHtml(rep.causes, sorted[sorted.length - 1].features).replace('<h2>Posibles averías', `<h2>Posibles averías · ${fmtKm(sorted[sorted.length - 1].km)}`) : ''}
+      ${rep.causes ? causesHtml(rep.causes, sorted[sorted.length - 1].features, sorted[sorted.length - 1].id, (sorted.slice(0, -1).reverse().find(x => x.testType === sorted[sorted.length - 1].testType) || {}).id).replace('<h2>Posibles averías', `<h2>Posibles averías · ${fmtKm(sorted[sorted.length - 1].km)}`) : ''}
       <div class="card"><h2>Espectros superpuestos ${Info.btn('spectrum')}</h2><canvas class="chart" id="repChart"></canvas>
         <div class="legend">${sorted.map((r, i) => `<span><i style="background:${COLORS[i % COLORS.length]}"></i>${fmtKm(r.km)}</span>`).join('')}</div>
         <p class="muted small">Curvas normalizadas: se compara la forma del sonido, no el volumen.</p></div>
@@ -866,9 +964,9 @@
         ${row('Nivel', f => f.levelDb + ' dB', 'levelDb')}
       </table></div></div>
       ${rep.pairs.map((p, pi) => `<div class="card"><h2>${p.global ? 'Evolución total' : 'Cambios'} ${fmtKm(p.a.km)} → ${fmtKm(p.b.km)}</h2>
-        <p class="muted small">${esc(p.b.reason)}</p>${fl(p.findings)}${freqHtml(p, pi)}</div>`).join('')}
+        <p class="muted small">${esc(p.b.reason)}</p>${fl(p.findings, p.b.id, p.a.id)}${freqHtml(p, pi)}</div>`).join('')}
       ${rep.trends.length ? `<div class="card"><h2>Tendencias</h2>${rep.trends.map(t => `<div class="finding"><span class="pill ${t.worse ? 'aviso' : 'info'}">${t.worse ? 'Empeora' : 'Cambio'}</span><span>${esc(t.text)} ${Info.btn(t.key)}</span></div>`).join('')}</div>` : ''}
-      <div class="card"><h2>Rasgos anómalos por grabación</h2>${rep.absolute.length ? rep.absolute.map(f => `<div class="finding"><span class="pill ${f.level}">${fmtKm(f.rec.km)}</span><span><b>${esc(f.area)}.</b> ${esc(f.text)} ${Info.area(f.area)}</span></div>`).join('') : '<p class="muted">Ninguno.</p>'}
+      <div class="card"><h2>Rasgos anómalos por grabación</h2>${rep.absolute.length ? rep.absolute.map(f => `<div class="finding"><span class="pill ${f.level}">${fmtKm(f.rec.km)}</span><span><b>${esc(f.area)}.</b> ${esc(f.text)} ${Info.area(f.area)}${playBtn(f.rec.id, presetForFinding(f, null), f.area)}</span></div>`).join('') : '<p class="muted">Ninguno.</p>'}
       ${rep.quality.length ? '<h3>Calidad de grabación</h3>' + rep.quality.map(q => `<div class="finding"><span class="pill ${q.level}">${fmtKm(q.rec.km)}</span><span>${esc(q.text)} ${Info.btn('reliable')}</span></div>`).join('') : ''}</div>
       <div class="card" id="aiCard"><h2>Interpretación de Claude</h2><div id="aiOut" class="ai muted small">${LS.get('apiKey', '') ? 'Pide una interpretación redactada a partir de estos datos.' : 'Añade tu clave API en Ajustes para obtener una interpretación redactada por Claude.'}</div>
         ${LS.get('apiKey', '') ? '<button class="btn ghost" id="btnAI">Generar interpretación</button>' : '<button class="btn ghost" data-go="ajustes">Ir a Ajustes</button>'}</div>

@@ -520,7 +520,7 @@
       const d = fb.bands[b.id] - fa.bands[b.id];
       if (Math.abs(d) >= LIM.bandChange && sig(b.id, d, true)) {
         const lvl = Math.abs(d) >= LIM.bandChangeAlert && d > 0 ? 'alerta' : (d > 0 ? 'aviso' : 'info');
-        out.push({ level: lvl, area: 'Timbre', text: `${b.name} (${b.lo}–${b.hi} Hz) ${d > 0 ? 'ganan' : 'pierden'} ${r1(Math.abs(d))} dB respecto al resto del sonido. Zona asociada a: ${b.desc}.` });
+        out.push({ level: lvl, area: 'Timbre', band: [b.lo, b.hi], text: `${b.name} (${b.lo}–${b.hi} Hz) ${d > 0 ? 'ganan' : 'pierden'} ${r1(Math.abs(d))} dB respecto al resto del sonido. Zona asociada a: ${b.desc}.` });
       }
     });
 
@@ -531,8 +531,8 @@
     (fb.tones || []).forEach(t => {
       if (nearTone(fa.tones, t.hz)) return;
       const moved = within(fa.tones, t.hz, 0.1);
-      if (moved) out.push({ level: 'aviso', area: 'Tono desplazado', text: `El tono de ${moved.hz} Hz pasa a ${t.hz} Hz (${t.hz > moved.hz ? '+' : ''}${Math.round(1000 * (t.hz - moved.hz) / moved.hz) / 10}%). Si no se explica por un cambio de rpm, puede ser una correa o un rodamiento que cambia.` });
-      else if (t.prom >= LIM.newTone) out.push({ level: t.hz > 1500 ? 'alerta' : 'aviso', area: 'Tono nuevo', text: `Aparece un tono de ${t.hz} Hz (${t.prom} dB sobre el fondo) que no estaba antes: típico de silbido de correa, rodamiento (alternador, tensor, bomba de agua) o turbo.` });
+      if (moved) out.push({ level: 'aviso', area: 'Tono desplazado', hz: t.hz, text: `El tono de ${moved.hz} Hz pasa a ${t.hz} Hz (${t.hz > moved.hz ? '+' : ''}${Math.round(1000 * (t.hz - moved.hz) / moved.hz) / 10}%). Si no se explica por un cambio de rpm, puede ser una correa o un rodamiento que cambia.` });
+      else if (t.prom >= LIM.newTone) out.push({ level: t.hz > 1500 ? 'alerta' : 'aviso', area: 'Tono nuevo', hz: t.hz, text: `Aparece un tono de ${t.hz} Hz (${t.prom} dB sobre el fondo) que no estaba antes: típico de silbido de correa, rodamiento (alternador, tensor, bomba de agua) o turbo.` });
     });
     (fa.tones || []).forEach(t => {
       if (t.prom >= LIM.newTone && !nearTone(fb.tones, t.hz) && !within(fb.tones, t.hz, 0.1))

@@ -221,6 +221,14 @@
   <div class="ia-msgs" id="iaMsgs"></div>
   <form class="ia-form" id="iaForm"><input id="iaQ" autocomplete="off" placeholder="Escribe tu pregunta…" maxlength="600"><button class="btn primary" aria-label="Enviar">➤</button></form>
 </div>
+<div id="player" class="player hidden">
+  <div class="pl-top"><div class="pl-info"><b id="plTitle"></b><small id="plSub"></small></div>
+    <button class="icon" id="plWav" aria-label="Exportar audio aislado" title="Exportar">⤓</button><button class="icon" id="plClose" aria-label="Cerrar">✕</button></div>
+  <div class="pl-ctl"><button class="pl-play" id="plPlay" aria-label="Reproducir o pausar">▶</button>
+    <div class="seg" id="plSeg"><button data-v="iso" class="on">Aislado</button><button data-v="orig">Original</button></div>
+    <span class="pl-time" id="plTime">0:00</span></div>
+  <div class="pl-prog" id="plProg"><i id="plBar"></i></div>
+</div>
 <div id="toast" class="toast hidden"></div>
 
 <script>window.IA_URL = "https://dondeloechan-ia.alexample.workers.dev/escuchamotor-ia";</script>

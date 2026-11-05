@@ -152,14 +152,15 @@
     },
     isolate: {
       t: 'Aislar el sonido anómalo',
-      b: `<p>Quita el sonido normal del motor y deja solo lo que destaca, amplificado para que lo oigas con claridad. Es la forma de saber <b>qué</b> ha detectado la app.</p>
+      b: `<p>Quita el sonido normal del motor y deja solo lo que destaca, amplificado. Pulsa <b>▶ Escuchar aislado</b> junto a cualquier aviso o posible avería y la app elige el filtro adecuado para ese fallo. En el reproductor puedes cambiar entre <b>Aislado</b> y <b>Original</b> en el mismo punto para comparar al oído.</p>
         <ul>
-          <li><b>Lo nuevo respecto a otra ficha:</b> usa una grabación de cuando el motor estaba bien como «huella» de su sonido normal y la resta frecuencia a frecuencia. Lo que queda es lo que ha aparecido después: silbidos, siseos, tonos nuevos, más ruido en una zona. Funciona mejor con fichas del mismo tipo de prueba y la misma colocación del móvil.</li>
-          <li><b>Lo que distingue a un cilindro:</b> la app sigue el ritmo de las explosiones, promedia cada cilindro por separado a lo largo de cientos de ciclos (así el ruido aleatorio se cancela) y resta lo que tienen en común. Queda lo que un cilindro hace distinto: el tic de un taqué o una válvula, el soplido de un inyector, un golpe de biela o una explosión débil. Si el motor está sano, casi no queda nada.</li>
-          <li><b>Golpes y ruidos sin ritmo:</b> lo contrario: quita todo lo que se repite en cada ciclo y deja los agudos que aparecen al azar, como el traqueteo de una cadena, un protector suelto o un roce.</li>
-          <li><b>Solo graves / solo agudos / solo el tono:</b> filtros sencillos para escuchar una zona concreta.</li>
+          <li><b>Lo nuevo frente a otra ficha:</b> filtro de Wiener con la «huella» de una grabación de cuando el motor estaba bien. Resta frecuencia a frecuencia lo que ya sonaba antes y deja lo que ha aparecido: silbidos, siseos, tonos, más ruido en una zona. Funciona mejor si las dos fichas se grabaron igual.</li>
+          <li><b>Lo propio de un cilindro:</b> sigue el giro del motor explosión a explosión (seguimiento de orden: cada ciclo se «estira» a la misma duración aunque las revoluciones varíen) y promedia cada cilindro por separado durante cientos de ciclos. En graves resta la forma media; en agudos usa la energía media de cada cilindro como máscara, para no borrar los tics. Queda lo que un cilindro hace distinto: tic de taqué o válvula, soplido de inyector, golpe de biela, explosión débil. También indica si se concentra en 1 de cada N explosiones.</li>
+          <li><b>Lo que no va al ritmo del motor:</b> quita todo lo que se repite en cada ciclo y deja accesorios y turbo (giran a otra velocidad), siseos y traqueteos al azar.</li>
+          <li><b>Solo el tono:</b> filtro muy estrecho (±3%) alrededor del silbido detectado.</li>
+          <li><b>Zona de frecuencias:</b> se puede combinar con cualquiera de los anteriores para afinar más (por ejemplo, «lo propio de un cilindro» solo en graves para un golpe de biela).</li>
         </ul>
-        <p class="muted">Ningún filtro es perfecto: queda algo de sonido residual y puede sonar «metálico» o entrecortado. Si al quitar casi todo no queda nada reconocible, es buena señal.</p>`
+        <p class="muted">Límite físico: el ruido aleatorio de la propia combustión se parece mucho a un traqueteo, así que los ruidos sin ritmo se separan peor que los tics o los tonos. El resultado puede sonar «metálico» o entrecortado. Si al quitar casi todo no queda nada reconocible, es buena señal.</p>`
     },
     causes: {
       t: 'Posibles averías',
